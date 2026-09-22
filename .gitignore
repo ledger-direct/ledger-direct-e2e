@@ -1,0 +1,14 @@
+node_modules/
+dist/
+out/
+.DS_Store
+
+# Secrets never live here. Seeds come from the environment only:
+# locally via ~/.config/ledger-direct/testnet.env, in CI via organisation secrets.
+.env
+.env.*
+*.seed
+
+# Handover documents: working input for coding sessions, not part of the project
+/Handover-*.md
+/CLAUDE.md
