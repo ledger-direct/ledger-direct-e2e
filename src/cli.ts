@@ -8,6 +8,11 @@ import { withClient } from './ledger/client.js';
 import { bookOffers, buy } from './ledger/dex.js';
 import { pay } from './ledger/payments.js';
 import { assetsWithoutXrp, balances, createFresh, faucet } from './ledger/wallets.js';
+import { PrestaShopDriver } from './drivers/prestashop.js';
+import { markdown, writeReport } from './report/report.js';
+import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
+import { resolveCaseIds, runCases } from './runner/run.js';
+import { readFile } from 'node:fs/promises';
 
 const program = new Command();
 program
@@ -131,11 +136,58 @@ cases
 
 program
   .command('run')
-  .description('run catalogue cases against a plugin (drivers not implemented yet)')
-  .requiredOption('--target <plugin>', 'prestashop | shopware | woocommerce | magento | all')
-  .option('--cases <ids>', 'comma-separated case IDs, or all', 'all')
-  .action((opts: { target: string; cases: string }) => {
-    throw new Error(`no driver for ${opts.target} yet — see src/drivers/driver.ts and Handover-E2E-Teststrategie.md §6`);
+  .description('run catalogue cases against a plugin and write the report')
+  .requiredOption('--target <plugin>', 'prestashop (shopware, woocommerce, magento: drivers pending)')
+  .option('--base-url <url>', 'how the shop is reached from here', 'http://localhost:8080')
+  .option('--compose-dir <dir>', 'folder with the shop\'s docker-compose.yml (PrestaShop driver)', process.env.LD_E2E_PRESTASHOP_COMPOSE_DIR ?? '.')
+  .option('--cases <ids>', 'comma-separated case IDs, "automated", or "all"', 'automated')
+  .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging)')
+  .option('--timeout <seconds>', 'per-case wait for a state', '180')
+  .option('--report <file>', 'JSON report path', 'out/report.json')
+  .action(async (opts: { target: string; baseUrl: string; composeDir: string; cases: string; receivingAccount?: string; timeout: string; report: string }) => {
+    if (opts.target !== 'prestashop') throw new Error(`no driver for ${opts.target} yet — see src/drivers/driver.ts`);
+    const driver = new PrestaShopDriver({ composeDir: opts.composeDir, baseUrl: opts.baseUrl });
+    const report = await runCases({
+      driver,
+      baseUrl: opts.baseUrl,
+      caseIds: resolveCaseIds(opts.cases),
+      receivingAccount: opts.receivingAccount,
+      timeoutMs: Number.parseInt(opts.timeout, 10) * 1000,
+      version: program.version() ?? '0.0.0',
+      log: (line) => process.stderr.write(redact(line) + '\n'),
+    });
+    await writeReport(report, opts.report);
+    const failed = report.results.filter((r) => r.outcome === 'fail').length;
+    out(report, () => markdown(report) + `\nreport: ${opts.report}`);
+    if (failed > 0) process.exitCode = 1;
+  });
+
+const reportCmd = program.command('report').description('turn a report into evidence where it belongs');
+reportCmd
+  .command('markdown')
+  .option('--from <file>', 'JSON report', 'out/report.json')
+  .action(async (opts: { from: string }) => {
+    const report = JSON.parse(await readFile(opts.from, 'utf8'));
+    process.stdout.write(markdown(report));
+  });
+reportCmd
+  .command('pr')
+  .description('tick the cases in a pull request\'s "Manual end-to-end tests" section, with hashes')
+  .requiredOption('--repo <owner/name>')
+  .requiredOption('--pr <number>')
+  .option('--from <file>', 'JSON report', 'out/report.json')
+  .option('--dry-run', 'print the new body instead of writing it', false)
+  .action(async (opts: { repo: string; pr: string; from: string; dryRun: boolean }) => {
+    const report = JSON.parse(await readFile(opts.from, 'utf8'));
+    const body = await readPrBody(opts.repo, Number.parseInt(opts.pr, 10));
+    const merged = mergeIntoBody(body, report);
+    if (opts.dryRun) {
+      process.stdout.write(merged.body + '\n');
+      process.stderr.write(`would replace ${merged.replaced.join(', ') || 'nothing'}; would add ${merged.missing.join(', ') || 'nothing'}\n`);
+      return;
+    }
+    await writePrBody(opts.repo, Number.parseInt(opts.pr, 10), merged.body);
+    out({ replaced: merged.replaced, added: merged.missing }, () => `updated ${opts.repo}#${opts.pr}: replaced ${merged.replaced.join(', ') || 'nothing'}, added ${merged.missing.join(', ') || 'nothing'}`);
   });
 
 program.parseAsync(process.argv).catch((error: unknown) => {

@@ -48,16 +48,39 @@ ld-e2e pay --to r... --tag 406757891 --amount 12.5 --asset RLUSD   # PS-04: a US
 
 Every payment prints the hash and an explorer link — the evidence a pull request's checklist asks for.
 
-## Catalogue
+## Running the catalogue
 
 ```
 ld-e2e cases list
 ld-e2e cases show PS-05
-ld-e2e run --target shopware --cases PS-05   # drivers are the next milestone
+ld-e2e run --target prestashop --base-url http://localhost:8080 \
+  --compose-dir ~/Documents/LedgerDirect/ledger-direct-prestashop --cases automated
 ```
+
+Every run creates a fresh receiving account on the testnet, points the shop at it, places real
+orders and pays them from the treasury. The report (`out/report.json`) carries, per case, the order
+reference, every transaction hash with its explorer link, and the states the status endpoint
+answered — evidence a third person can check.
+
+Automated so far, against PrestaShop: PS-01 waiting, PS-03 partial then topped up, PS-05 settled,
+PS-08 throttling. The PrestaShop driver places orders through `dev/bin/e2e.php` inside the shop's
+container (`--compose-dir`), because the platform's checkout over HTTP is not what the catalogue
+tests; everything a customer does is HTTP.
+
+## Writing results into a pull request
+
+```
+ld-e2e report pr --repo ledger-direct/ledger-direct-prestashop --pr 15 --dry-run
+ld-e2e report pr --repo ledger-direct/ledger-direct-prestashop --pr 15
+```
+
+The pull request stays the record, as before: in its "Manual end-to-end tests" section every line
+that starts with a case ID is replaced by the report's line for that case — ticked when it passed,
+with order reference and hashes; left open with the reason when it failed. Lines without an ID and
+every other section are untouched, and a second run replaces its own lines. It runs as you, via `gh`.
 
 ## Roadmap
 
-See `Handover-E2E-Teststrategie.md` (harness folder). In order: ledger tooling (done),
-Shopware driver, PS-01/03/05/08 against Shopware, the other three drivers, the MCP server,
-nightly `e2e.yml` workflows with organisation secrets.
+See `Handover-E2E-Teststrategie.md` (harness folder). Next: the Shopware driver (Store API), then
+WooCommerce and Magento; PS-02/06/07/09/11 as runners; the MCP server; nightly `e2e.yml` workflows
+with organisation secrets.
