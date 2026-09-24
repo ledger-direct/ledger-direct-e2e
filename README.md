@@ -1,86 +1,106 @@
 # ledger-direct-e2e
 
-End-to-end harness for the LedgerDirect plugins (PrestaShop, Shopware, WooCommerce, Magento):
-XRPL testnet wallets, payments the way a customer wallet sends them, and the payment-status case
-catalogue PS-01 … PS-11 — one tool for all four shops, as a CLI and, later, as an MCP server.
+**End-to-end tests for XRPL payment integrations, against a real ledger, with evidence you can look up.**
 
-Testnet only. This tool never touches mainnet.
+The harness plays the customer with a wallet. It reads what a shop asks for off its payment page,
+sends exactly that — or deliberately something else — as a signed transaction on the XRP Ledger
+testnet, and checks what the shop makes of it. Every result is something a third person can
+verify: an order reference, the transaction hashes with explorer links, the sequence of states the
+shop's status endpoint answered.
 
-## Setup
+It tests the contract between ledger and shop. Not the ledger (`xrpl.js` does that), not the user
+interface (Cypress does that), not the shop's logic with made-up records (its unit tests do that) —
+the one question all of those leave open: **does the amount the page shows, paid for real, settle
+the order?** And the questions behind it: what if less arrives, or the wrong token, or the quote has
+expired, or the customer is a guest, or nobody keeps the page open, or the merchant cancelled?
+
+Testnet only. There is no mainnet URL in this code.
+
+## The cases
+
+Eleven cases with fixed IDs, platform-neutral, from the LedgerDirect payment-status contract. Ten
+run unattended; PS-10 waits 35 minutes and belongs to a nightly run.
+
+| ID | Case | What it proves |
+|---|---|---|
+| PS-01 | Waiting | nothing sent: state `waiting`, countdown falls, no redirect |
+| PS-02 | Expired, then refreshed | an expired quote is refreshed on the same account and tag; a partial payment survives the refresh |
+| PS-03 | Partial, then topped up | half arrives: `partial` with the shortfall; the shortfall arrives: `settled`, two hashes, one payment record |
+| PS-04 | Wrong asset, then the right one | a USDC order paid in RLUSD from the real issuers: `wrong_asset`, full amount still due, merchant sees it; USDC settles |
+| PS-05 | Settled | **the one that matters:** the displayed amount, sent exactly, settles — on a small order, where rounding bites hardest |
+| PS-06 | Guest | page and status endpoint work with the order's secret alone, no session |
+| PS-07 | Wrong key | refused with 403, identically for a wrong key and an unknown order, no data in the answer |
+| PS-08 | Throttling | two status calls inside 5 s cause one node request |
+| PS-09 | Safety net | paid, nobody polls: the platform's cron or scheduled task settles the order alone |
+| PS-10 | Late return | paid 35 minutes after checkout: settles, redirect goes to an order page, not an expired token |
+| PS-11 | Closed by the merchant | cancelled, paid anyway: redirect, no state change back to open |
+
+`ld-e2e cases list` and `ld-e2e cases show PS-05` print the catalogue.
+
+## Quick start
 
 ```
-npm install
-npm run build          # dist/cli.js, exposed as `ld-e2e`
-npm test
+npm install && npm run build
+set -a; source ~/.config/ledger-direct/testnet.env; set +a     # LEDGERDIRECT_TESTNET_TREASURY_SEED
+ld-e2e wallet status                                           # the treasury: XRP, RLUSD, USDC
+ld-e2e run --target prestashop --base-url http://localhost:8080 \
+  --compose-dir /path/to/prestashop-harness --cases automated
 ```
 
-Secrets come from the environment and from nowhere else:
+A run creates a fresh receiving account on the testnet (two runs must never share a destination-tag
+space), sets trust lines, points the shop at it, places real orders and pays them from the treasury.
+`out/report.json` holds the evidence; the console prints one checklist line per case.
+
+## Drivers
+
+A platform is eight methods (`src/drivers/driver.ts`): configure the shop, place an order, read the
+payment page (state, **displayed** amount, account, tag), read the status endpoint, refresh an
+expired quote, close an order, trigger the safety net, count node requests. Everything on the
+ledger side is shared; the catalogue never changes per platform.
+
+| Platform | Driver | Notes |
+|---|---|---|
+| PrestaShop 9 | `prestashop.ts` | orders through the module's `dev/bin/e2e.php` inside the shop container; everything a customer does is HTTP |
+| Shopware 6 | — | next: Store API |
+| WooCommerce | — | planned |
+| Magento 2 | — | planned |
+
+The displayed amount is read off the page and never recomputed. That is the number a customer
+types into a wallet, and the one a rounding bug hides in.
+
+## Evidence into the pull request
 
 ```
-set -a; source ~/.config/ledger-direct/testnet.env; set +a
+ld-e2e report pr --repo owner/name --pr 15 --dry-run
+ld-e2e report pr --repo owner/name --pr 15
 ```
 
-`LEDGERDIRECT_TESTNET_TREASURY_SEED` is the wallet that pays. In CI the same variable is an
-organisation secret. Seeds are never written to a repository, a report, a log or an error message.
+The pull request stays the record. In its "Manual end-to-end tests" section, every line that starts
+with a case ID is replaced by the report's line for that case: ticked when it passed, with order
+reference and hashes; left open with the reason when it failed. Lines without an ID and every other
+section are untouched; a second run replaces its own lines. It runs as you, through `gh`.
 
 ## Wallets
 
 ```
-ld-e2e wallet status                       # treasury: XRP, RLUSD, USDC
-ld-e2e wallet status rSomeShopAccount      # any account
-ld-e2e wallet fresh --trustlines           # a new receiving account for one run — one per run, never shared
-ld-e2e wallet fund rSomeAccount            # faucet top-up, +100 XRP
-ld-e2e wallet book RLUSD                   # what the testnet DEX offers
-ld-e2e wallet top-up --rlusd 20 --usdc 20  # buy tokens on the DEX (no faucet web page, no captcha)
+ld-e2e wallet fresh --trustlines     # a new account for one run; prints the seed once
+ld-e2e wallet fund r...              # faucet, +100 XRP
+ld-e2e wallet book RLUSD             # what the testnet DEX offers
+ld-e2e wallet top-up --rlusd 20      # buy tokens on the DEX — no faucet web page, no captcha
+ld-e2e pay --to r... --tag 123 --amount 0.83 [--asset RLUSD] [--partial]
 ```
 
-## Paying
+## Secrets
 
-Read the amount, account and tag off the shop's payment page and send exactly that — the harness
-never recomputes an amount, because the number the customer types into a wallet is the one that
-has to settle:
+Seeds come from the environment and from nowhere else. There is no file loader; locally you source
+one file, in CI the same variable names are organisation secrets. Anything that looks like a seed is
+redacted before it can reach an error message, a report or a log. Never put a seed in this
+repository — not in a test, not as a sample.
 
-```
-ld-e2e pay --to r... --tag 406757891 --amount 15.06378
-ld-e2e pay --to r... --tag 406757891 --amount 5              # PS-03: half now, the shortfall later
-ld-e2e pay --to r... --tag 406757891 --amount 12.5 --asset RLUSD   # PS-04: a USDC order paid in RLUSD
-```
+## Status
 
-Every payment prints the hash and an explorer link — the evidence a pull request's checklist asks for.
+0.1.0. Ten cases automated and green against PrestaShop with real testnet transactions. Next:
+the Shopware driver, an MCP server over the same functions so a coding session can run a case as a
+tool, then WooCommerce and Magento, then nightly runs.
 
-## Running the catalogue
-
-```
-ld-e2e cases list
-ld-e2e cases show PS-05
-ld-e2e run --target prestashop --base-url http://localhost:8080 \
-  --compose-dir ~/Documents/LedgerDirect/ledger-direct-prestashop --cases automated
-```
-
-Every run creates a fresh receiving account on the testnet, points the shop at it, places real
-orders and pays them from the treasury. The report (`out/report.json`) carries, per case, the order
-reference, every transaction hash with its explorer link, and the states the status endpoint
-answered — evidence a third person can check.
-
-Automated so far, against PrestaShop: PS-01 waiting, PS-03 partial then topped up, PS-05 settled,
-PS-08 throttling. The PrestaShop driver places orders through `dev/bin/e2e.php` inside the shop's
-container (`--compose-dir`), because the platform's checkout over HTTP is not what the catalogue
-tests; everything a customer does is HTTP.
-
-## Writing results into a pull request
-
-```
-ld-e2e report pr --repo ledger-direct/ledger-direct-prestashop --pr 15 --dry-run
-ld-e2e report pr --repo ledger-direct/ledger-direct-prestashop --pr 15
-```
-
-The pull request stays the record, as before: in its "Manual end-to-end tests" section every line
-that starts with a case ID is replaced by the report's line for that case — ticked when it passed,
-with order reference and hashes; left open with the reason when it failed. Lines without an ID and
-every other section are untouched, and a second run replaces its own lines. It runs as you, via `gh`.
-
-## Roadmap
-
-See `Handover-E2E-Teststrategie.md` (harness folder). Next: the Shopware driver (Store API), then
-WooCommerce and Magento; PS-02/06/07/09/11 as runners; the MCP server; nightly `e2e.yml` workflows
-with organisation secrets.
+MIT.
