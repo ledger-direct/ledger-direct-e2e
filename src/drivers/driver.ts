@@ -52,12 +52,17 @@ export interface Driver {
   status(order: PlacedOrder): Promise<StatusPayload>;
   /** The raw answer of the status endpoint — for the cases that expect a refusal (PS-07). */
   statusResponse(order: PlacedOrder): Promise<{ status: number; body: string }>;
+  /** A well-formed order id that does not exist on this platform — for PS-07. */
+  unknownOrderId(): string;
   /** The raw answer of the payment page — 200 for the owner, a redirect for anyone else. */
   pageResponse(order: PlacedOrder): Promise<{ status: number }>;
   refresh(order: PlacedOrder): Promise<void>;
   close(order: PlacedOrder): Promise<void>;
   /** Whatever settles orders without a browser: cron URL, scheduled task, WP-cron. Returns what it answered. */
   safetyNet(): Promise<unknown>;
-  /** Node requests observed since the last call — how PS-08 is proven. */
-  nodeRequests(): Promise<number>;
+  /**
+   * A value that changes exactly when the platform synced with the node — how PS-08 is
+   * proven. Null when the platform cannot expose it; the case then falls back to timing.
+   */
+  nodeRequests(): Promise<number | null>;
 }

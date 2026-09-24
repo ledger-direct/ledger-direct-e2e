@@ -10,6 +10,7 @@ import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { balances as xrplBalances } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { PrestaShopDriver } from './drivers/prestashop.js';
+import { ShopwareDriver } from './drivers/shopware.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
@@ -163,20 +164,32 @@ cases
 program
   .command('run')
   .description('run catalogue cases against a plugin and write the report')
-  .requiredOption('--target <plugin>', 'prestashop (shopware, woocommerce, magento: drivers pending)')
-  .option('--base-url <url>', 'how the shop is reached from here', 'http://localhost:8080')
-  .option('--compose-dir <dir>', "folder with the shop's docker-compose.yml (PrestaShop driver)", process.env.LD_E2E_PRESTASHOP_COMPOSE_DIR ?? '.')
+  .requiredOption('--target <plugin>', 'prestashop | shopware (woocommerce, magento: drivers pending)')
+  .option('--base-url <url>', 'how the shop is reached from here (PrestaShop default http://localhost:8080, Shopware http://localhost)')
+  .option('--compose-dir <dir>', "PrestaShop: folder with the shop's docker-compose.yml", process.env.LD_E2E_PRESTASHOP_COMPOSE_DIR ?? '.')
+  .option('--access-key <key>', 'Shopware: sales channel access key', process.env.LD_E2E_SHOPWARE_ACCESS_KEY)
+  .option('--container <name>', 'Shopware: docker container for the scheduled task', process.env.LD_E2E_SHOPWARE_CONTAINER ?? 'shopware6_672-shopware-1')
   .option('--cases <ids>', 'comma-separated case IDs, "automated", or "all"', 'automated')
   .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging)')
   .option('--timeout <seconds>', 'per-case wait for a state', '240')
   .option('--report <file>', 'JSON report path', 'out/report.json')
-  .action(async (opts: { target: string; baseUrl: string; composeDir: string; cases: string; receivingAccount?: string; timeout: string; report: string }) => {
-    if (opts.target !== 'prestashop') throw new Error(`no driver for ${opts.target} yet — see src/drivers/driver.ts`);
-    const driver = new PrestaShopDriver({ composeDir: opts.composeDir, baseUrl: opts.baseUrl });
+  .action(async (opts: { target: string; baseUrl?: string; composeDir: string; accessKey?: string; container: string; cases: string; receivingAccount?: string; timeout: string; report: string }) => {
+    let driver: PrestaShopDriver | ShopwareDriver;
+    let baseUrl: string;
+    if (opts.target === 'prestashop') {
+      baseUrl = opts.baseUrl ?? 'http://localhost:8080';
+      driver = new PrestaShopDriver({ composeDir: opts.composeDir, baseUrl });
+    } else if (opts.target === 'shopware') {
+      if (!opts.accessKey) throw new Error('Shopware needs --access-key (or LD_E2E_SHOPWARE_ACCESS_KEY): the sales channel access key');
+      baseUrl = opts.baseUrl ?? 'http://localhost';
+      driver = new ShopwareDriver({ baseUrl, accessKey: opts.accessKey, container: opts.container, adminUser: process.env.LD_E2E_SHOPWARE_ADMIN_USER, adminPassword: process.env.LD_E2E_SHOPWARE_ADMIN_PASSWORD });
+    } else {
+      throw new Error(`no driver for ${opts.target} yet — see src/drivers/driver.ts`);
+    }
     const report = await runCases({
       driver,
       ledger: ledgerFor(chain()),
-      baseUrl: opts.baseUrl,
+      baseUrl,
       caseIds: resolveCaseIds(opts.cases),
       receivingAccount: opts.receivingAccount,
       timeoutMs: Number.parseInt(opts.timeout, 10) * 1000,

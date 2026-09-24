@@ -73,6 +73,10 @@ export class PrestaShopDriver implements Driver {
     return { status: response.status, body: await response.text() };
   }
 
+  unknownOrderId(): string {
+    return '999999999';
+  }
+
   async pageResponse(order: PlacedOrder): Promise<{ status: number }> {
     const url = `${this.options.baseUrl}/module/ledgerdirect/payment?id_order=${order.id}&key=${order.secret}`;
     const response = await fetch(url, { redirect: 'manual' });
@@ -96,7 +100,7 @@ export class PrestaShopDriver implements Driver {
   }
 
   /** The throttle mark's stored value: it changes exactly when a sync ran. */
-  async nodeRequests(): Promise<number> {
+  async nodeRequests(): Promise<number | null> {
     const r = (await this.helper('sync-marker', {})) as { value: string | null };
     return r.value === null ? 0 : Number.parseInt(r.value, 10);
   }

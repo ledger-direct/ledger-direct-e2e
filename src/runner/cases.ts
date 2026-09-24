@@ -53,15 +53,40 @@ export const RUNNERS: Record<string, CaseRunner> = {
     await ctx.driver.status(order);
     await sleep(6000);
     const before = await ctx.driver.nodeRequests();
+    const t1 = Date.now();
     const a = await ctx.driver.status(order);
+    const firstMs = Date.now() - t1;
     const afterFirst = await ctx.driver.nodeRequests();
+    const t2 = Date.now();
     const b = await ctx.driver.status(order);
+    const secondMs = Date.now() - t2;
     const afterSecond = await ctx.driver.nodeRequests();
-    ctx.expect(afterFirst !== before, 'the first call after the window synced');
-    ctx.expect(afterSecond === afterFirst, 'the second call inside the window did not sync');
+    if (before === null) {
+      // No observable mark on this platform: a node request costs about a second, an
+      // answer from the stored intent a few tens of milliseconds.
+      ctx.note(`timing: first call ${firstMs} ms, second call ${secondMs} ms`);
+      ctx.expect(secondMs < 400 && secondMs * 2 < firstMs, 'the second call inside the window answered without a node request (by timing)');
+    } else {
+      ctx.expect(afterFirst !== before, 'the first call after the window synced');
+      ctx.expect(afterSecond === afterFirst, 'the second call inside the window did not sync');
+    }
     ctx.expect(JSON.stringify(Object.keys(a)) === JSON.stringify(Object.keys(b)), 'both answers have the same shape');
   },
 };
+
+/** Two refusals are the same when status and message agree; a dev-mode stack trace may differ. */
+function sameRefusal(a: string, b: string): boolean {
+  const strip = (text: string): string => {
+    try {
+      const parsed = JSON.parse(text) as Record<string, unknown>;
+      delete parsed.trace;
+      return JSON.stringify(parsed);
+    } catch {
+      return text;
+    }
+  };
+  return strip(a) === strip(b);
+}
 
 function halfOf(amount: string): string {
   const [int, frac = ''] = amount.split('.');
@@ -122,8 +147,8 @@ RUNNERS['PS-07'] = async (ctx) => {
   const status = await ctx.driver.statusResponse(forged);
   ctx.expect(status.status === 403, `wrong key is refused with 403 (got ${status.status})`);
   ctx.expect(!status.body.includes(order.reference) && !status.body.includes('amount') && !status.body.includes('state'), 'refusal carries no order data');
-  const missing = await ctx.driver.statusResponse({ ...order, id: '999999999' });
-  ctx.expect(missing.status === 403 && missing.body === status.body, 'an unknown order is refused exactly like a wrong key');
+  const missing = await ctx.driver.statusResponse({ ...order, id: ctx.driver.unknownOrderId() });
+  ctx.expect(missing.status === status.status && sameRefusal(missing.body, status.body), 'an unknown order is refused exactly like a wrong key');
   const page = await ctx.driver.pageResponse(forged);
   ctx.expect(page.status >= 300 && page.status < 400, `payment page with a wrong key redirects (got ${page.status})`);
 };
@@ -134,8 +159,10 @@ RUNNERS['PS-09'] = async (ctx) => {
   // Nobody polls: the customer closed the page. Only the safety net can settle this order.
   const answer = (await ctx.driver.safetyNet()) as { synced?: boolean; checked?: number; settled?: number } | undefined;
   ctx.note(`safety net answered ${JSON.stringify(answer ?? null)}`);
-  ctx.expect(answer?.synced === true, 'safety net synced the ledger');
-  ctx.expect((answer?.settled ?? 0) >= 1, 'safety net settled at least this order');
+  if (answer && 'synced' in answer) {
+    ctx.expect(answer.synced === true, 'safety net synced the ledger');
+    ctx.expect((answer.settled ?? 0) >= 1, 'safety net settled at least this order');
+  }
   const seen = await platformState(ctx, order);
   ctx.expect(seen.paid === true && seen.hashMatches, 'order is paid with the transaction hash, without a poll');
   const after = await ctx.driver.status(order);
