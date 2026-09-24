@@ -36,7 +36,8 @@ export function markdownLines(report: Report): Map<string, string> {
   const lines = new Map<string, string>();
   for (const r of report.results) {
     const box = r.outcome === 'pass' ? '[x]' : '[ ]';
-    const order = r.evidence.find((e) => e.kind === 'order')?.text.match(/order (\S+) \(#(\d+)\)/);
+    // Platform ids are numeric on PrestaShop and hex UUIDs on Shopware; the reference is what a reader looks up.
+    const order = r.evidence.find((e) => e.kind === 'order')?.text.match(/order (\S+) \(#([^)]+)\)/);
     const hashes = r.evidence.filter((e) => e.kind === 'tx' && e.hash).map((e) => `[\`${e.hash!.slice(0, 8)}…\`](${e.explorer})`);
     const parts = [
       order ? `order ${order[1]}` : null,
