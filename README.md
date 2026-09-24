@@ -51,6 +51,19 @@ A run creates a fresh receiving account on the testnet (two runs must never shar
 space), sets trust lines, points the shop at it, places real orders and pays them from the treasury.
 `out/report.json` holds the evidence; the console prints one checklist line per case.
 
+## Chains
+
+The catalogue talks about a receiving account, a payment identifier, a native asset, issued assets
+and a hash — none of which is XRPL. `src/chains/chain.ts` is the contract; `xrpl/` and `stellar/`
+fulfil it. `--chain XRPL|STELLAR` picks one, each with its own treasury in the environment.
+
+| Chain | Identifier | Native | Faucet | Status |
+|---|---|---|---|---|
+| XRPL testnet | destination tag | XRP | `faucet.altnet.rippletest.net`, DEX top-ups | ten cases green against PrestaShop |
+| Stellar testnet | `MEMO_ID` | XLM | Friendbot | wallets and payments with memo verified; issued assets follow the core's Stellar registry; cases run once a plugin accepts Stellar |
+
+A third chain is one class behind the contract, one entry in `ledgerFor()`, one treasury variable.
+
 ## Drivers
 
 A platform is eight methods (`src/drivers/driver.ts`): configure the shop, place an order, read the
@@ -99,7 +112,8 @@ repository — not in a test, not as a sample.
 
 ## Status
 
-0.1.0. Ten cases automated and green against PrestaShop with real testnet transactions. Next:
+0.1.0. Ten cases automated and green against PrestaShop on XRPL with real testnet transactions;
+Stellar wired and verified on the ledger side. Next:
 the Shopware driver, an MCP server over the same functions so a coding session can run a case as a
 tool, then WooCommerce and Magento, then nightly runs.
 

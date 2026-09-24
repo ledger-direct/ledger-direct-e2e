@@ -10,18 +10,18 @@ export type CaseRunner = (ctx: CaseContext) => Promise<void>;
  */
 export const RUNNERS: Record<string, CaseRunner> = {
   'PS-01': async (ctx) => {
-    const { order, page } = await ctx.placeOrder('XRP');
+    const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
     ctx.expect(page.state === 'waiting', 'page renders waiting');
     const first = await ctx.driver.status(order);
     ctx.expect(first.state === 'waiting' && first.redirect === undefined, 'poll answers waiting without redirect');
     await sleep(3000);
     const second = await ctx.driver.status(order);
     ctx.expect(typeof first.seconds_left === 'number' && typeof second.seconds_left === 'number' && second.seconds_left < first.seconds_left, `seconds_left falls (${first.seconds_left} → ${second.seconds_left})`);
-    ctx.expect(second.schema_version === 1 && second.base_asset === 'XRP', 'contract fields present');
+    ctx.expect(second.schema_version === 1 && second.base_asset === ctx.ledger.nativeAsset, 'contract fields present');
   },
 
   'PS-03': async (ctx) => {
-    const { order, page } = await ctx.placeOrder('XRP');
+    const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
     const half = halfOf(page.amountDisplayed);
     await ctx.pay(page, half);
     const partial = await ctx.pollUntil(order, (s) => s.state === 'partial', 'partial');
@@ -37,7 +37,7 @@ export const RUNNERS: Record<string, CaseRunner> = {
   },
 
   'PS-05': async (ctx) => {
-    const { order, page } = await ctx.placeOrder('XRP');
+    const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
     await ctx.pay(page, page.amountDisplayed);
     const settled = await ctx.pollUntil(order, (s) => s.redirect !== undefined, 'redirect');
     ctx.expect(settled.state === 'settled', 'state settled');
@@ -48,7 +48,7 @@ export const RUNNERS: Record<string, CaseRunner> = {
   },
 
   'PS-08': async (ctx) => {
-    const { order } = await ctx.placeOrder('XRP');
+    const { order } = await ctx.placeOrder(ctx.ledger.nativeAsset);
     // First call syncs (or the throttle window is already open from placing the order); wait it out.
     await ctx.driver.status(order);
     await sleep(6000);
@@ -90,33 +90,34 @@ export function statusValue(s: StatusPayload, key: 'amount_paid' | 'shortfall'):
 }
 
 RUNNERS['PS-04'] = async (ctx) => {
-  const { order, page } = await ctx.placeOrder('USDC');
-  ctx.expect(page.asset === 'USDC', 'order is quoted in USDC');
-  // The same number, but in RLUSD: the customer's wallet reports success, the shop credits nothing.
-  await ctx.pay(page, page.amountDisplayed, 'RLUSD');
+  const [quoted, other] = ctx.wrongAssetPair();
+  const { order, page } = await ctx.placeOrder(quoted);
+  ctx.expect(page.asset === quoted, `order is quoted in ${quoted}`);
+  // The same number, but in another token: the customer's wallet reports success, the shop credits nothing.
+  await ctx.pay(page, page.amountDisplayed, other);
   const wrong = await ctx.pollUntil(order, (s) => s.state === 'wrong_asset', 'wrong_asset');
   ctx.expect(statusValue(wrong, 'shortfall') !== null && Number(statusValue(wrong, 'shortfall')) === Number(page.amountDisplayed), 'shortfall is the full request');
   ctx.expect(wrong.redirect === undefined, 'no redirect while nothing is credited');
   const seen = await platformState(ctx, order);
   ctx.expect(seen.paid === false && seen.incomplete === true, 'merchant sees the incomplete state');
-  await ctx.pay(page, page.amountDisplayed, 'USDC');
+  await ctx.pay(page, page.amountDisplayed, quoted);
   const settled = await ctx.pollUntil(order, (s) => s.redirect !== undefined, 'redirect after the right token');
-  ctx.expect(settled.state === 'settled', 'USDC settles the order');
+  ctx.expect(settled.state === 'settled', `${quoted} settles the order`);
   ctx.expect((await platformState(ctx, order)).paid === true, 'order is in the paid state');
 };
 
 RUNNERS['PS-06'] = async (ctx) => {
   // The harness holds no session cookie: everything it does, it does as a guest with the key.
-  const { order, page } = await ctx.placeOrder('XRP');
+  const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
   const pageResponse = await ctx.driver.pageResponse(order);
   ctx.expect(pageResponse.status === 200, 'payment page renders with the key alone');
-  ctx.expect(page.state === 'waiting' && page.destinationTag > 0, 'page carries the payment instructions');
+  ctx.expect(page.state === 'waiting' && page.paymentIdentifier !== '', 'page carries the payment instructions');
   const status = await ctx.driver.statusResponse(order);
   ctx.expect(status.status === 200 && status.body.includes('"schema_version":1'), 'status endpoint answers the contract without a login');
 };
 
 RUNNERS['PS-07'] = async (ctx) => {
-  const { order } = await ctx.placeOrder('XRP');
+  const { order } = await ctx.placeOrder(ctx.ledger.nativeAsset);
   const forged = { ...order, secret: 'not-the-key' };
   const status = await ctx.driver.statusResponse(forged);
   ctx.expect(status.status === 403, `wrong key is refused with 403 (got ${status.status})`);
@@ -128,7 +129,7 @@ RUNNERS['PS-07'] = async (ctx) => {
 };
 
 RUNNERS['PS-09'] = async (ctx) => {
-  const { order, page } = await ctx.placeOrder('XRP');
+  const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
   await ctx.pay(page, page.amountDisplayed);
   // Nobody polls: the customer closed the page. Only the safety net can settle this order.
   const answer = (await ctx.driver.safetyNet()) as { synced?: boolean; checked?: number; settled?: number } | undefined;
@@ -142,7 +143,7 @@ RUNNERS['PS-09'] = async (ctx) => {
 };
 
 RUNNERS['PS-11'] = async (ctx) => {
-  const { order, page } = await ctx.placeOrder('XRP');
+  const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
   await ctx.driver.close(order);
   ctx.note('merchant cancelled the order');
   await ctx.pay(page, page.amountDisplayed);
@@ -155,25 +156,25 @@ RUNNERS['PS-11'] = async (ctx) => {
 RUNNERS['PS-02'] = async (ctx) => {
   await ctx.reconfigure({ quoteExpirySeconds: 60 });
   try {
-    const { order, page } = await ctx.placeOrder('XRP');
+    const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
     const expired = await ctx.pollUntil(order, (s) => s.state === 'expired', 'expired', 5000);
     ctx.expect(expired.seconds_left === null && expired.redirect === undefined, 'expired: no countdown, no redirect');
     await ctx.driver.refresh(order);
     const refreshed = await ctx.driver.paymentPage(order);
     ctx.expect(refreshed.state === 'waiting', 'refresh yields a fresh quote');
-    ctx.expect(refreshed.destinationTag === page.destinationTag && refreshed.destinationAccount === page.destinationAccount, 'destination account and tag unchanged');
+    ctx.expect(refreshed.paymentIdentifier === page.paymentIdentifier && refreshed.destinationAccount === page.destinationAccount, 'destination account and payment identifier unchanged');
     const status = await ctx.driver.status(order);
     ctx.expect(typeof status.seconds_left === 'number' && status.seconds_left > 0, 'countdown runs again');
     ctx.note(`amount before ${page.amountDisplayed}, after ${refreshed.amountDisplayed}`);
 
     // A refresh must not wipe a payment that already arrived.
-    const second = await ctx.placeOrder('XRP');
+    const second = await ctx.placeOrder(ctx.ledger.nativeAsset);
     await ctx.pay(second.page, halfOf(second.page.amountDisplayed));
     await ctx.pollUntil(second.order, (s) => s.state === 'partial', 'partial', 5000);
     await sleep(65000);
     await ctx.driver.refresh(second.order);
     const afterRefresh = await ctx.driver.paymentPage(second.order);
-    ctx.expect(afterRefresh.state === 'partial' && afterRefresh.destinationTag === second.page.destinationTag, 'partial payment survives a refresh, tag unchanged');
+    ctx.expect(afterRefresh.state === 'partial' && afterRefresh.paymentIdentifier === second.page.paymentIdentifier, 'partial payment survives a refresh, identifier unchanged');
   } finally {
     await ctx.reconfigure({});
   }

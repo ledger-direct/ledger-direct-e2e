@@ -4,9 +4,15 @@
   "description": "End-to-end harness for the LedgerDirect plugins: XRPL testnet wallets, payments, and the PS-01…PS-11 case catalogue, as a CLI and (later) an MCP server",
   "license": "MIT",
   "type": "module",
-  "bin": { "ld-e2e": "dist/cli.js" },
-  "files": ["dist"],
-  "engines": { "node": ">=20" },
+  "bin": {
+    "ld-e2e": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -15,6 +21,7 @@
     "lint": "eslint src tests"
   },
   "dependencies": {
+    "@stellar/stellar-sdk": "^17.1.0",
     "commander": "^13.1.0",
     "xrpl": "^4.2.5"
   },

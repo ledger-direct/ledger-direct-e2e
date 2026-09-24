@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ASSETS, TESTNET_ISSUED, assetFromCurrency, isAsset } from '../src/assets.js';
+import { ASSETS, TESTNET_ISSUED, assetFromCurrency, isAsset } from '../src/chains/xrpl/assets.js';
 import { redact } from '../src/config.js';
 import { CASES, findCase } from '../src/cases/catalogue.js';
 

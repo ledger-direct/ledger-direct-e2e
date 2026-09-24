@@ -1,5 +1,5 @@
 import { Client, Wallet, TrustSet } from 'xrpl';
-import { ASSETS, Asset, TESTNET_FAUCET, TESTNET_ISSUED, assetFromCurrency } from '../assets.js';
+import { ASSETS, Asset, TESTNET_FAUCET, TESTNET_ISSUED, assetFromCurrency } from './assets.js';
 
 export interface Balances {
   address: string;

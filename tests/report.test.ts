@@ -3,7 +3,7 @@ import { mergeIntoBody } from '../src/report/pr.js';
 import { markdownLines, type Report } from '../src/report/report.js';
 
 const report: Report = {
-  tool: 'ld-e2e', version: '0.1.0', target: 'prestashop', baseUrl: 'http://localhost:8080',
+  tool: 'ld-e2e', version: '0.1.0', target: 'prestashop', chain: 'XRPL', baseUrl: 'http://localhost:8080',
   receivingAccount: 'rRecv', network: 'testnet', startedAt: '2026-09-23T12:00:00.000Z',
   results: [
     { id: 'PS-05', title: 'Settled', target: 'prestashop', outcome: 'pass', startedAt: '2026-09-23T12:01:00.000Z', durationMs: 20000, states: ['settled'],

@@ -1,7 +1,5 @@
-import { Client } from 'xrpl';
 import type { Driver, PlacedOrder, PaymentPageView, ShopConfig, StatusPayload } from '../drivers/driver.js';
-import { pay, type PaymentResult } from '../ledger/payments.js';
-import type { Asset } from '../assets.js';
+import type { Ledger, PaymentResult } from '../chains/chain.js';
 
 export interface Evidence {
   kind: 'order' | 'tx' | 'state' | 'note';
@@ -16,12 +14,19 @@ export class CaseContext {
 
   constructor(
     readonly driver: Driver,
-    readonly client: Client,
+    readonly ledger: Ledger,
     private readonly payerSeed: string,
     readonly timeoutMs: number,
     readonly log: (line: string) => void,
     readonly shop: ShopConfig,
   ) {}
+
+  /** The quoted asset and the wrong one for PS-04: the chain's two issued assets. */
+  wrongAssetPair(): [string, string] {
+    const issued = this.ledger.assets().filter((a) => !a.native).map((a) => a.code);
+    if (issued.length < 2) throw new Error(`PS-04 needs two issued assets on ${this.ledger.chain}; known: ${issued.join(', ') || 'none'}`);
+    return [issued[1], issued[0]];
+  }
 
   /** Re-points the shop with one setting changed; the caller restores it afterwards. */
   async reconfigure(changes: Partial<ShopConfig>): Promise<void> {
@@ -33,19 +38,19 @@ export class CaseContext {
     this.log(text);
   }
 
-  async placeOrder(asset: PaymentPageView['asset']): Promise<{ order: PlacedOrder; page: PaymentPageView }> {
+  async placeOrder(asset: string): Promise<{ order: PlacedOrder; page: PaymentPageView }> {
     const order = await this.driver.placeOrder(asset, '');
     const page = await this.driver.paymentPage(order);
-    this.evidence.push({ kind: 'order', text: `order ${order.reference} (#${order.id}), page shows ${page.amountDisplayed} ${page.asset} to ${page.destinationAccount} tag ${page.destinationTag}, state ${page.state}` });
-    this.log(`order ${order.reference}: ${page.amountDisplayed} ${page.asset}, tag ${page.destinationTag}`);
+    this.evidence.push({ kind: 'order', text: `order ${order.reference} (#${order.id}), page shows ${page.amountDisplayed} ${page.asset} to ${page.destinationAccount} id ${page.paymentIdentifier}, state ${page.state}` });
+    this.log(`order ${order.reference}: ${page.amountDisplayed} ${page.asset}, id ${page.paymentIdentifier}`);
     return { order, page };
   }
 
-  async pay(page: PaymentPageView, amount: string, asset: Asset = page.asset, extra: { partial?: boolean } = {}): Promise<PaymentResult> {
-    const result = await pay(this.client, { seed: this.payerSeed, to: page.destinationAccount, destinationTag: page.destinationTag, amount, asset, partial: extra.partial });
+  async pay(page: PaymentPageView, amount: string, asset: string = page.asset, extra: { partial?: boolean } = {}): Promise<PaymentResult> {
+    const result = await this.ledger.pay({ seed: this.payerSeed, to: page.destinationAccount, identifier: page.paymentIdentifier, amount, asset, partial: extra.partial });
     this.evidence.push({ kind: 'tx', text: `sent ${amount} ${asset} → ${result.result}`, hash: result.hash, explorer: result.explorer });
     this.log(`paid ${amount} ${asset}: ${result.result} ${result.hash}`);
-    if (result.result !== 'tesSUCCESS') throw new Error(`payment failed: ${result.result}`);
+    if (!result.validated) throw new Error(`payment failed: ${result.result}`);
     return result;
   }
 

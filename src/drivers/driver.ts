@@ -11,7 +11,7 @@ import type { State } from '../cases/catalogue.js';
 export interface ShopConfig {
   destinationAccount: string;
   network: 'testnet';
-  assets: Array<'XRP' | 'RLUSD' | 'USDC'>;
+  assets: string[];
   quoteExpirySeconds: number;
 }
 
@@ -26,9 +26,10 @@ export interface PaymentPageView {
   state: State;
   /** Exactly as displayed — the harness never recomputes an amount. */
   amountDisplayed: string;
-  asset: 'XRP' | 'RLUSD' | 'USDC';
+  asset: string;
   destinationAccount: string;
-  destinationTag: number;
+  /** Destination tag (XRPL) or memo id (Stellar) as shown, as a decimal string. */
+  paymentIdentifier: string;
   statusUrl: string;
 }
 
@@ -46,7 +47,7 @@ export interface StatusPayload {
 export interface Driver {
   readonly name: 'prestashop' | 'shopware' | 'woocommerce' | 'magento';
   configure(config: ShopConfig): Promise<void>;
-  placeOrder(asset: PaymentPageView['asset'], amountInShopCurrency: string): Promise<PlacedOrder>;
+  placeOrder(asset: string, amountInShopCurrency: string): Promise<PlacedOrder>;
   paymentPage(order: PlacedOrder): Promise<PaymentPageView>;
   status(order: PlacedOrder): Promise<StatusPayload>;
   /** The raw answer of the status endpoint — for the cases that expect a refusal (PS-07). */

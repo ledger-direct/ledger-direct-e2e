@@ -36,7 +36,7 @@ export class PrestaShopDriver implements Driver {
     this.cronUrl = this.rebase(r.cron_url);
   }
 
-  async placeOrder(asset: PaymentPageView['asset'], _amountInShopCurrency: string): Promise<PlacedOrder & { pollUrl: string; pageUrl: string; cronUrl: string }> {
+  async placeOrder(asset: string, _amountInShopCurrency: string): Promise<PlacedOrder & { pollUrl: string; pageUrl: string; cronUrl: string }> {
     const r = (await this.helper('create-order', { asset })) as { id_order: number; reference: string; key: string; page: string; poll: string; cron: string };
     this.cronUrl = this.rebase(r.cron);
     return { id: String(r.id_order), reference: r.reference, secret: r.key, pollUrl: this.rebase(r.poll), pageUrl: this.rebase(r.page), cronUrl: this.cronUrl };
@@ -53,9 +53,9 @@ export class PrestaShopDriver implements Driver {
     return {
       state: state as State,
       amountDisplayed: amount[1].trim(),
-      asset: amount[2] as PaymentPageView['asset'],
+      asset: amount[2],
       destinationAccount: account[1].trim(),
-      destinationTag: Number.parseInt(tag[1], 10),
+      paymentIdentifier: tag[1],
       statusUrl: attr(html, 'data-ld-poll-url')?.replace(/&amp;/g, '&') ?? `${this.options.baseUrl}/module/ledgerdirect/poll?id_order=${order.id}&key=${order.secret}`,
     };
   }

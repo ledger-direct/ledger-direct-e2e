@@ -1,5 +1,5 @@
 import { Client, Payment, PaymentFlags, Wallet, xrpToDrops, dropsToXrp } from 'xrpl';
-import { Asset, TESTNET_EXPLORER_TX, TESTNET_ISSUED } from '../assets.js';
+import { Asset, TESTNET_EXPLORER_TX, TESTNET_ISSUED } from './assets.js';
 
 export interface PaymentRequest {
   seed: string;

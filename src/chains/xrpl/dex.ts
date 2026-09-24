@@ -1,5 +1,5 @@
 import { Client, OfferCreate, OfferCreateFlags, Wallet, xrpToDrops, dropsToXrp } from 'xrpl';
-import { Asset, TESTNET_ISSUED } from '../assets.js';
+import { Asset, TESTNET_ISSUED } from './assets.js';
 
 export interface Offer {
   gives: string;

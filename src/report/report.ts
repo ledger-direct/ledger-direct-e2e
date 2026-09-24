@@ -18,6 +18,7 @@ export interface Report {
   tool: string;
   version: string;
   target: string;
+  chain: string;
   baseUrl: string;
   receivingAccount: string;
   network: 'testnet';
@@ -42,7 +43,7 @@ export function markdownLines(report: Report): Map<string, string> {
       hashes.length ? `tx ${hashes.join(', ')}` : null,
       r.states.length ? `states ${r.states.join(' → ')}` : null,
       r.outcome === 'fail' ? `**failed:** ${r.reason ?? 'unknown'}` : null,
-      `ld-e2e ${report.version} on ${report.target}, ${r.startedAt.slice(0, 16).replace('T', ' ')} UTC`,
+      `ld-e2e ${report.version} on ${report.target}/${report.chain}, ${r.startedAt.slice(0, 16).replace('T', ' ')} UTC`,
     ].filter((p): p is string => p !== null);
     lines.set(r.id, `- ${box} ${r.id} ${r.title} — ${parts.join('; ')}`);
   }
