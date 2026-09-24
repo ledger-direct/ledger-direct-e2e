@@ -48,6 +48,8 @@ ld-e2e wallet status                          # --chain XRPL is the default
 ld-e2e --chain STELLAR wallet status
 ld-e2e run --target prestashop --base-url http://localhost:8080 \
   --compose-dir /path/to/prestashop-harness --cases automated   # --chain STELLAR once a plugin accepts it
+ld-e2e run --target shopware --base-url http://localhost \
+  --access-key <sales channel access key> --cases automated
 ```
 
 Every command takes `--chain XRPL|STELLAR`; without it, XRPL. Each chain has its own treasury
@@ -64,7 +66,7 @@ fulfil it. `--chain XRPL|STELLAR` picks one, each with its own treasury in the e
 
 | Chain | Identifier | Native | Faucet | Status |
 |---|---|---|---|---|
-| XRPL testnet | destination tag | XRP | `faucet.altnet.rippletest.net`, DEX top-ups | ten cases green against PrestaShop |
+| XRPL testnet | destination tag | XRP | `faucet.altnet.rippletest.net`, DEX top-ups | ten cases green against PrestaShop and Shopware |
 | Stellar testnet | `MEMO_ID` | XLM | Friendbot | wallets and payments with memo verified; issued assets follow the core's Stellar registry; cases run once a plugin accepts Stellar |
 
 A third chain is one class behind the contract, one entry in `ledgerFor()`, one treasury variable.
@@ -79,12 +81,18 @@ ledger side is shared; the catalogue never changes per platform.
 | Platform | Driver | Notes |
 |---|---|---|
 | PrestaShop 9 | `prestashop.ts` | orders through the module's `dev/bin/e2e.php` inside the shop container; everything a customer does is HTTP |
-| Shopware 6 | — | next: Store API |
+| Shopware 6.7 | `shopware.ts` | Store API for the order (guest registration, cart, order, handle-payment), Admin API for configuration, order state and cancelling; the scheduled task runs through the container's console |
 | WooCommerce | — | planned |
 | Magento 2 | — | planned |
 
 The displayed amount is read off the page and never recomputed. That is the number a customer
 types into a wallet, and the one a rounding bug hides in.
+
+PS-08 needs an observable for "a sync happened": PrestaShop exposes the throttle mark in a table,
+Shopware logs one debug line per sync (`LedgerDirect: ledger synced`, `APP_ENV=dev`). The first
+Shopware run of PS-08 found that Shopware's own dev configuration backs the object cache with an
+in-memory array adapter, which turns the plugin's throttle and rate cache into no-ops per request:
+the dev shop needs `framework.cache.app: cache.adapter.filesystem` (or Redis), as production has.
 
 ## Evidence into the pull request
 
@@ -124,9 +132,8 @@ repository — not in a test, not as a sample.
 
 ## Status
 
-0.1.0. Ten cases automated and green against PrestaShop on XRPL with real testnet transactions;
-Stellar wired and verified on the ledger side. Next:
-the Shopware driver, an MCP server over the same functions so a coding session can run a case as a
-tool, then WooCommerce and Magento, then nightly runs.
+0.1.0. Ten cases automated and green against PrestaShop and Shopware on XRPL with real testnet
+transactions; Stellar wired and verified on the ledger side. Next: an MCP server over the same
+functions so a coding session can run a case as a tool, then WooCommerce and Magento, then nightly runs.
 
 MIT.
