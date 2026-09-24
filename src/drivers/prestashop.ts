@@ -67,6 +67,18 @@ export class PrestaShopDriver implements Driver {
     return (await response.json()) as StatusPayload;
   }
 
+  async statusResponse(order: PlacedOrder): Promise<{ status: number; body: string }> {
+    const url = `${this.options.baseUrl}/module/ledgerdirect/poll?id_order=${order.id}&key=${order.secret}`;
+    const response = await fetch(url, { headers: { Accept: 'application/json' } });
+    return { status: response.status, body: await response.text() };
+  }
+
+  async pageResponse(order: PlacedOrder): Promise<{ status: number }> {
+    const url = `${this.options.baseUrl}/module/ledgerdirect/payment?id_order=${order.id}&key=${order.secret}`;
+    const response = await fetch(url, { redirect: 'manual' });
+    return { status: response.status };
+  }
+
   async refresh(order: PlacedOrder): Promise<void> {
     const url = `${this.options.baseUrl}/module/ledgerdirect/payment?id_order=${order.id}&key=${order.secret}`;
     await fetch(url, { method: 'POST', body: new URLSearchParams({ ld_refresh: '1' }), redirect: 'manual' });
@@ -76,10 +88,11 @@ export class PrestaShopDriver implements Driver {
     await this.helper('close-order', { order: order.id });
   }
 
-  async safetyNet(): Promise<void> {
+  async safetyNet(): Promise<unknown> {
     if (!this.cronUrl) throw new Error('cron url unknown — configure() or placeOrder() first');
     const response = await fetch(this.cronUrl);
     if (!response.ok) throw new Error(`cron answered ${response.status}`);
+    return response.json();
   }
 
   /** The throttle mark's stored value: it changes exactly when a sync ran. */

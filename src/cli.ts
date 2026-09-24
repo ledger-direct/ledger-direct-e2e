@@ -142,7 +142,7 @@ program
   .option('--compose-dir <dir>', 'folder with the shop\'s docker-compose.yml (PrestaShop driver)', process.env.LD_E2E_PRESTASHOP_COMPOSE_DIR ?? '.')
   .option('--cases <ids>', 'comma-separated case IDs, "automated", or "all"', 'automated')
   .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging)')
-  .option('--timeout <seconds>', 'per-case wait for a state', '180')
+  .option('--timeout <seconds>', 'per-case wait for a state', '240')
   .option('--report <file>', 'JSON report path', 'out/report.json')
   .action(async (opts: { target: string; baseUrl: string; composeDir: string; cases: string; receivingAccount?: string; timeout: string; report: string }) => {
     if (opts.target !== 'prestashop') throw new Error(`no driver for ${opts.target} yet — see src/drivers/driver.ts`);

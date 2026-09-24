@@ -49,9 +49,14 @@ export interface Driver {
   placeOrder(asset: PaymentPageView['asset'], amountInShopCurrency: string): Promise<PlacedOrder>;
   paymentPage(order: PlacedOrder): Promise<PaymentPageView>;
   status(order: PlacedOrder): Promise<StatusPayload>;
+  /** The raw answer of the status endpoint — for the cases that expect a refusal (PS-07). */
+  statusResponse(order: PlacedOrder): Promise<{ status: number; body: string }>;
+  /** The raw answer of the payment page — 200 for the owner, a redirect for anyone else. */
+  pageResponse(order: PlacedOrder): Promise<{ status: number }>;
   refresh(order: PlacedOrder): Promise<void>;
   close(order: PlacedOrder): Promise<void>;
-  safetyNet(): Promise<void>;
+  /** Whatever settles orders without a browser: cron URL, scheduled task, WP-cron. Returns what it answered. */
+  safetyNet(): Promise<unknown>;
   /** Node requests observed since the last call — how PS-08 is proven. */
   nodeRequests(): Promise<number>;
 }

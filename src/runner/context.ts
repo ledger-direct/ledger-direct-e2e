@@ -1,5 +1,5 @@
 import { Client } from 'xrpl';
-import type { Driver, PlacedOrder, PaymentPageView, StatusPayload } from '../drivers/driver.js';
+import type { Driver, PlacedOrder, PaymentPageView, ShopConfig, StatusPayload } from '../drivers/driver.js';
 import { pay, type PaymentResult } from '../ledger/payments.js';
 import type { Asset } from '../assets.js';
 
@@ -20,7 +20,13 @@ export class CaseContext {
     private readonly payerSeed: string,
     readonly timeoutMs: number,
     readonly log: (line: string) => void,
+    readonly shop: ShopConfig,
   ) {}
+
+  /** Re-points the shop with one setting changed; the caller restores it afterwards. */
+  async reconfigure(changes: Partial<ShopConfig>): Promise<void> {
+    await this.driver.configure({ ...this.shop, ...changes });
+  }
 
   note(text: string): void {
     this.evidence.push({ kind: 'note', text });

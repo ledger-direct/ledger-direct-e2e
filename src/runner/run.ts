@@ -27,18 +27,20 @@ export async function runCases(options: RunOptions): Promise<Report> {
     let receivingAccount = options.receivingAccount;
     if (!receivingAccount) {
       // A fresh receiving account per run: two runs must never share a tag space.
-      const fresh = await createFresh(client, { trustlines: false });
+      // With trust lines to RLUSD and USDC, so the stablecoin cases can receive.
+      const fresh = await createFresh(client, { trustlines: true });
       receivingAccount = fresh.wallet.classicAddress;
       options.log(`receiving account for this run: ${receivingAccount}`);
     }
-    await options.driver.configure({ destinationAccount: receivingAccount, network: 'testnet', assets: ['XRP'], quoteExpirySeconds: 300 });
+    const shop = { destinationAccount: receivingAccount, network: 'testnet' as const, assets: ['XRP', 'RLUSD', 'USDC'] as Array<'XRP' | 'RLUSD' | 'USDC'>, quoteExpirySeconds: 300 };
+    await options.driver.configure(shop);
 
     const results: CaseResult[] = [];
     for (const id of options.caseIds) {
       const spec = findCase(id);
       const runner = RUNNERS[id.toUpperCase()];
       const caseStart = Date.now();
-      const ctx = new CaseContext(options.driver, client, payerSeed, options.timeoutMs, (line) => options.log(`  ${id}: ${line}`));
+      const ctx = new CaseContext(options.driver, client, payerSeed, options.timeoutMs, (line) => options.log(`  ${id}: ${line}`), shop);
       if (!spec || !runner) {
         results.push({ id, title: spec?.title ?? '?', target: options.driver.name, outcome: 'skip', reason: 'not automated yet', startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] });
         continue;
