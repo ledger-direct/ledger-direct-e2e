@@ -23,7 +23,7 @@ describe('assets', () => {
 
 describe('redact', () => {
   it('removes anything that looks like a family seed', () => {
-    expect(redact('seed sEdTestSeedNotRealSeedNotRealAAA leaked')).toBe('seed [seed redacted] leaked');
+    expect(redact('seed sEdTestSeedNotRea1SeedNotRea1AAA leaked')).toBe('seed [seed redacted] leaked');
     expect(redact('address rGT9kXUuutRVGrUyRciupE8VbRWqL4fUPo stays')).toContain('rGT9kXUuutRVGrUyRciupE8VbRWqL4fUPo');
   });
 });
