@@ -1,9 +1,9 @@
 # ledger-direct-e2e
 
-**End-to-end tests for XRPL payment integrations, against a real ledger, with evidence you can look up.**
+**End-to-end tests for ledger payment integrations — XRPL and Stellar — against a real testnet, with evidence you can look up.**
 
 The harness plays the customer with a wallet. It reads what a shop asks for off its payment page,
-sends exactly that — or deliberately something else — as a signed transaction on the XRP Ledger
+sends exactly that — or deliberately something else — as a signed transaction on the chain's
 testnet, and checks what the shop makes of it. Every result is something a third person can
 verify: an order reference, the transaction hashes with explorer links, the sequence of states the
 shop's status endpoint answered.
@@ -41,15 +41,20 @@ run unattended; PS-10 waits 35 minutes and belongs to a nightly run.
 
 ```
 npm install && npm run build
-set -a; source ~/.config/ledger-direct/testnet.env; set +a     # LEDGERDIRECT_TESTNET_TREASURY_SEED
-ld-e2e wallet status                                           # the treasury: XRP, RLUSD, USDC
+set -a; source ~/.config/ledger-direct/testnet.env; set +a
+#   LEDGERDIRECT_TESTNET_TREASURY_SEED          the XRPL treasury (XRP, RLUSD, USDC)
+#   LEDGERDIRECT_TESTNET_STELLAR_TREASURY_SEED  the Stellar treasury (XLM)
+ld-e2e wallet status                          # --chain XRPL is the default
+ld-e2e --chain STELLAR wallet status
 ld-e2e run --target prestashop --base-url http://localhost:8080 \
-  --compose-dir /path/to/prestashop-harness --cases automated
+  --compose-dir /path/to/prestashop-harness --cases automated   # --chain STELLAR once a plugin accepts it
 ```
 
-A run creates a fresh receiving account on the testnet (two runs must never share a destination-tag
-space), sets trust lines, points the shop at it, places real orders and pays them from the treasury.
-`out/report.json` holds the evidence; the console prints one checklist line per case.
+Every command takes `--chain XRPL|STELLAR`; without it, XRPL. Each chain has its own treasury
+wallet, and a run creates a fresh receiving account on that chain (two runs must never share an
+identifier space), sets trust lines, points the shop at it, places real orders and pays them from
+the chain's treasury. `out/report.json` holds the evidence; the console prints one checklist line per
+case.
 
 ## Chains
 
@@ -96,12 +101,18 @@ section are untouched; a second run replaces its own lines. It runs as you, thro
 ## Wallets
 
 ```
-ld-e2e wallet fresh --trustlines     # a new account for one run; prints the seed once
-ld-e2e wallet fund r...              # faucet, +100 XRP
-ld-e2e wallet book RLUSD             # what the testnet DEX offers
-ld-e2e wallet top-up --rlusd 20      # buy tokens on the DEX — no faucet web page, no captcha
-ld-e2e pay --to r... --tag 123 --amount 0.83 [--asset RLUSD] [--partial]
+ld-e2e wallet fresh --trustlines                 # a new XRPL account for one run; prints the seed once
+ld-e2e --chain STELLAR wallet fresh              # the same on Stellar, via Friendbot
+ld-e2e wallet fund r...                          # XRPL faucet, +100 XRP
+ld-e2e --chain STELLAR wallet fund G...          # Friendbot, +10 000 XLM
+ld-e2e wallet book RLUSD                         # XRPL only: what the testnet DEX offers
+ld-e2e wallet top-up --rlusd 20                  # XRPL only: buy tokens on the DEX — no faucet web page, no captcha
+ld-e2e pay --to r... --id 123 --amount 0.83 [--asset RLUSD] [--partial]     # XRPL: --id is the destination tag
+ld-e2e --chain STELLAR pay --to G... --id 123 --amount 1.5                    # Stellar: --id is the MEMO_ID
 ```
+
+On Stellar, issued assets (USDC, EURC) are not listed until the core's Stellar registry ships;
+`wallet status` shows XLM only, and a test asset can be issued for the wrong-asset case.
 
 ## Secrets
 
