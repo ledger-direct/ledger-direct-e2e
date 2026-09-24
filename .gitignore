@@ -12,3 +12,6 @@ out/
 # Handover documents: working input for coding sessions, not part of the project
 /Handover-*.md
 /CLAUDE.md
+
+# IDE state is per person and per machine
+.idea/
