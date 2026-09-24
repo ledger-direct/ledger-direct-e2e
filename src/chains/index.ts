@@ -21,5 +21,5 @@ export function ledgerFor(chain: string): Ledger {
 
 /** The environment variable holding the treasury seed for a chain. */
 export function treasurySeedVariable(chain: ChainId): string {
-  return chain === 'XRPL' ? 'LEDGERDIRECT_TESTNET_TREASURY_SEED' : `LEDGERDIRECT_TESTNET_${chain}_TREASURY_SEED`;
+  return `LEDGERDIRECT_TESTNET_${chain}_TREASURY_SEED`;
 }

@@ -42,7 +42,7 @@ run unattended; PS-10 waits 35 minutes and belongs to a nightly run.
 ```
 npm install && npm run build
 set -a; source ~/.config/ledger-direct/testnet.env; set +a
-#   LEDGERDIRECT_TESTNET_TREASURY_SEED          the XRPL treasury (XRP, RLUSD, USDC)
+#   LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED     the XRPL treasury (XRP, RLUSD, USDC)
 #   LEDGERDIRECT_TESTNET_STELLAR_TREASURY_SEED  the Stellar treasury (XLM)
 ld-e2e wallet status                          # --chain XRPL is the default
 ld-e2e --chain STELLAR wallet status
@@ -116,8 +116,9 @@ On Stellar, issued assets (USDC, EURC) are not listed until the core's Stellar r
 
 ## Secrets
 
-Seeds come from the environment and from nowhere else. There is no file loader; locally you source
-one file, in CI the same variable names are organisation secrets. Anything that looks like a seed is
+Seeds come from the environment and from nowhere else. The program knows no file: locally you
+`source` one (`.env.example` shows the variables; the convention is `~/.config/ledger-direct/testnet.env`,
+outside every repository), in CI the same variable names are organisation secrets. Anything that looks like a seed is
 redacted before it can reach an error message, a report or a log. Never put a seed in this
 repository — not in a test, not as a sample.
 

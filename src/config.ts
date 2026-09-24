@@ -6,8 +6,9 @@
  * There is no file loader in this project on purpose — a second loading path
  * is how a seed ends up being read from a repository one day.
  */
-export const ENV_TREASURY_SEED = 'LEDGERDIRECT_TESTNET_TREASURY_SEED';
-export const ENV_TREASURY_ADDRESS = 'LEDGERDIRECT_TESTNET_TREASURY_ADDRESS';
+/** One treasury per chain: LEDGERDIRECT_TESTNET_<CHAIN>_TREASURY_SEED / _ADDRESS. */
+export const ENV_XRPL_TREASURY_SEED = 'LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED';
+export const ENV_XRPL_TREASURY_ADDRESS = 'LEDGERDIRECT_TESTNET_XRPL_TREASURY_ADDRESS';
 
 export class MissingSecretError extends Error {
   constructor(name: string) {
@@ -19,13 +20,13 @@ export class MissingSecretError extends Error {
   }
 }
 
-export function requireSeed(variable: string = ENV_TREASURY_SEED): string {
+export function requireSeed(variable: string): string {
   const seed = process.env[variable];
   if (!seed || seed.trim() === '') throw new MissingSecretError(variable);
   return seed.trim();
 }
 
-export function optionalAddress(variable: string = ENV_TREASURY_ADDRESS): string | undefined {
+export function optionalAddress(variable: string): string | undefined {
   const value = process.env[variable];
   return value && value.trim() !== '' ? value.trim() : undefined;
 }

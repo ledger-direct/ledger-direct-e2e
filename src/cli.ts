@@ -92,7 +92,7 @@ wallet
   .option('--rlusd <value>', 'RLUSD to buy')
   .option('--usdc <value>', 'USDC to buy')
   .option('--max-xrp <value>', 'XRP to spend per purchase at most', '50')
-  .option('--seed-env <variable>', 'environment variable holding the seed', 'LEDGERDIRECT_TESTNET_TREASURY_SEED')
+  .option('--seed-env <variable>', 'environment variable holding the seed', 'LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED')
   .action(async (opts: { rlusd?: string; usdc?: string; maxXrp: string; seedEnv: string }) => {
     if (chain() !== 'XRPL') throw new Error('top-up via DEX exists for XRPL only; on Stellar issue a test asset or use a faucet');
     const w = Wallet.fromSeed(requireSeed(opts.seedEnv));

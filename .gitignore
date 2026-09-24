@@ -7,6 +7,7 @@ out/
 # locally via ~/.config/ledger-direct/testnet.env, in CI via organisation secrets.
 .env
 .env.*
+!.env.example
 *.seed
 
 # Handover documents: working input for coding sessions, not part of the project
