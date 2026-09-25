@@ -7,8 +7,7 @@ import { CHAINS, isChain, ledgerFor, treasurySeedVariable } from './chains/index
 import type { ChainId, Ledger } from './chains/chain.js';
 import { redact, requireSeed } from './config.js';
 import type { Driver, PlacedOrder } from './drivers/driver.js';
-import { PrestaShopDriver } from './drivers/prestashop.js';
-import { ShopwareDriver } from './drivers/shopware.js';
+import { createDriver, TARGETS } from './drivers/factory.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
@@ -36,38 +35,21 @@ export function createServer(): McpServer {
   const jobs = new Map<string, { status: 'running' | 'done' | 'failed'; startedAt: string; log: string[]; result?: unknown; error?: string }>();
   const maxPayment = Number.parseFloat(process.env.LD_E2E_MAX_PAYMENT ?? '50');
 
-  const targetSchema = z.enum(['prestashop', 'shopware']).describe('the shop under test');
+  const targetSchema = z.enum(TARGETS).describe('the shop under test');
   const chainSchema = z.enum(['XRPL', 'STELLAR']).default('XRPL').describe('the chain; XRPL by default');
 
   function text(data: unknown): { content: Array<{ type: 'text'; text: string }> } {
     return { content: [{ type: 'text', text: redact(typeof data === 'string' ? data : JSON.stringify(data, null, 2)) }] };
   }
 
-  function driverFor(target: string): Driver {
-    if (target === 'prestashop') {
-      return new PrestaShopDriver({
-        composeDir: process.env.LD_E2E_PRESTASHOP_COMPOSE_DIR ?? '.',
-        baseUrl: process.env.LD_E2E_PRESTASHOP_BASE_URL ?? 'http://localhost:8080',
-      });
-    }
-    const accessKey = process.env.LD_E2E_SHOPWARE_ACCESS_KEY;
-    if (!accessKey) throw new Error('LD_E2E_SHOPWARE_ACCESS_KEY is not set (the sales channel access key)');
-    return new ShopwareDriver({
-      baseUrl: process.env.LD_E2E_SHOPWARE_BASE_URL ?? 'http://localhost',
-      accessKey,
-      container: process.env.LD_E2E_SHOPWARE_CONTAINER,
-      adminUser: process.env.LD_E2E_SHOPWARE_ADMIN_USER,
-      adminPassword: process.env.LD_E2E_SHOPWARE_ADMIN_PASSWORD,
-    });
-  }
-
   // Drivers keep per-order secrets in memory (Shopware's deepLinkCode and return URL); one instance per target.
-  const drivers = new Map<string, Driver>();
-  const driver = (target: string): Driver => {
+  const drivers = new Map<string, { driver: Driver; baseUrl: string }>();
+  const shop = (target: string): { driver: Driver; baseUrl: string } => {
     let d = drivers.get(target);
-    if (!d) drivers.set(target, (d = driverFor(target)));
+    if (!d) drivers.set(target, (d = createDriver(target)));
     return d;
   };
+  const driver = (target: string): Driver => shop(target).driver;
 
   async function withLedger<T>(chain: ChainId, fn: (ledger: Ledger) => Promise<T>): Promise<T> {
     const ledger = ledgerFor(chain);
@@ -247,7 +229,7 @@ export function createServer(): McpServer {
     void runCases({
       driver: driver(target),
       ledger: ledgerFor(chain),
-      baseUrl: process.env[`LD_E2E_${target.toUpperCase()}_BASE_URL`] ?? '',
+      baseUrl: shop(target).baseUrl,
       caseIds: ids,
       timeoutMs: 240_000,
       version: '0.1.0',

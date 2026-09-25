@@ -50,7 +50,14 @@ ld-e2e run --target prestashop --base-url http://localhost:8080 \
   --compose-dir /path/to/prestashop-harness --cases automated   # --chain STELLAR once a plugin accepts it
 ld-e2e run --target shopware --base-url http://localhost \
   --access-key <sales channel access key> --cases automated
+ld-e2e run --target woocommerce --base-url http://localhost:8082 \
+  --compose-dir /path/to/wordpress-stack --cases automated      # WP-CLI runs in that stack
+ld-e2e run --target magento --base-url https://localhost:8444 \
+  --compose-dir /path/to/magento-stack --cases automated         # PHP runs in that stack
 ```
+
+Every `--base-url` and `--compose-dir` has an environment fallback, `LD_E2E_<TARGET>_BASE_URL` and
+`LD_E2E_<TARGET>_COMPOSE_DIR`, so a run is usually just `--target` and `--cases`.
 
 Every command takes `--chain XRPL|STELLAR`; without it, XRPL. Each chain has its own treasury
 wallet, and a run creates a fresh receiving account on that chain (two runs must never share an
@@ -82,14 +89,16 @@ ledger side is shared; the catalogue never changes per platform.
 |---|---|---|
 | PrestaShop 9 | `prestashop.ts` | orders through the module's `dev/bin/e2e.php` inside the shop container; everything a customer does is HTTP |
 | Shopware 6.7 | `shopware.ts` | Store API for the order (guest registration, cart, order, handle-payment), Admin API for configuration, order state and cancelling; the scheduled task runs through the container's console |
-| WooCommerce | — | planned |
-| Magento 2 | — | planned |
+| WooCommerce | `woocommerce.ts` | orders through WP-CLI in the stack's running `wp` container (a PHP script on stdin, as the gateway's `process_payment` would); page, status endpoint and the refresh form over HTTP; the Action Scheduler hook fired for the safety net |
+| Magento 2 | `magento.ts` | REST API for the order (guest cart, item, addresses, payment method), admin REST for order state and cancelling; configuration, cron job and throttle mark as PHP inside the `phpfpm` container; accepts the dev shop's self-signed certificate |
 
 The displayed amount is read off the page and never recomputed. That is the number a customer
 types into a wallet, and the one a rounding bug hides in.
 
 PS-08 needs an observable for "a sync happened": PrestaShop exposes the throttle mark in a table,
-Shopware logs one debug line per sync (`LedgerDirect: ledger synced`, `APP_ENV=dev`). The first
+WooCommerce in a transient and Magento in its cache (all three hold the time of the last sync, read
+through the platform's CLI), Shopware logs one debug line per sync (`LedgerDirect: ledger synced`,
+`APP_ENV=dev`). The first
 Shopware run of PS-08 found that Shopware's own dev configuration backs the object cache with an
 in-memory array adapter, which turns the plugin's throttle and rate cache into no-ops per request:
 the dev shop needs `framework.cache.app: cache.adapter.filesystem` (or Redis), as production has.
@@ -117,8 +126,9 @@ claude mcp add ledger-direct-e2e -- /path/to/ledger-direct-e2e/scripts/ld-e2e-mc
 ```
 
 Give the server the shops it may talk to through the environment (in the same file):
-`LD_E2E_PRESTASHOP_COMPOSE_DIR`, `LD_E2E_PRESTASHOP_BASE_URL`, `LD_E2E_SHOPWARE_ACCESS_KEY`,
-`LD_E2E_SHOPWARE_BASE_URL`, and optionally `LD_E2E_MAX_PAYMENT` (default 50).
+`LD_E2E_<TARGET>_BASE_URL` and `LD_E2E_<TARGET>_COMPOSE_DIR` for PrestaShop, WooCommerce and
+Magento, `LD_E2E_SHOPWARE_ACCESS_KEY` for Shopware (`.env.example` lists them all), and optionally
+`LD_E2E_MAX_PAYMENT` (default 50).
 
 | Group | Tools |
 |---|---|
@@ -158,10 +168,10 @@ repository — not in a test, not as a sample.
 
 ## Status
 
-0.1.0. Ten cases automated and green against PrestaShop and Shopware on XRPL with real testnet
-transactions; Stellar wired and verified on the ledger side; the MCP server drives the same
-functions, verified with a two-item RLUSD order placed, paid and settled through the tools. Next:
-WooCommerce and Magento drivers, then nightly runs. A mainnet mode follows once the canary token
+0.1.0. Ten cases automated and green against PrestaShop, Shopware, WooCommerce and Magento on XRPL
+with real testnet transactions; Stellar wired and verified on the ledger side; the MCP server drives
+the same functions, verified with a two-item RLUSD order placed, paid and settled through the tools.
+Next: nightly runs. A mainnet mode follows once the canary token
 exists — a separate decision, not a flag.
 
 MIT.

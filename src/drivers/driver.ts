@@ -5,8 +5,8 @@ import type { State } from '../cases/catalogue.js';
  * platform is an afternoon. Everything ledger-side is shared; only placing an
  * order and reading what the shop shows differ per platform.
  *
- * Implementations: prestashop.ts, shopware.ts, woocommerce.ts, magento.ts —
- * none written yet. See Handover-E2E-Teststrategie.md §3 for the mapping.
+ * Implementations: prestashop.ts, shopware.ts, woocommerce.ts, magento.ts;
+ * factory.ts builds them. See Handover-E2E-Teststrategie.md §3 for the mapping.
  */
 export interface ShopConfig {
   destinationAccount: string;
@@ -71,6 +71,12 @@ export interface Driver {
   statusResponse(order: PlacedOrder): Promise<{ status: number; body: string }>;
   /** A well-formed order id that does not exist on this platform — for PS-07. */
   unknownOrderId(): string;
+  /**
+   * A key of the right shape that is not the order's — for PS-07, on platforms that
+   * check the shape of the key before the guard runs (WooCommerce's route pattern).
+   * Absent: the case uses a plainly wrong string.
+   */
+  wrongSecret?(): string;
   /** The raw answer of the payment page — 200 for the owner, a redirect for anyone else. */
   pageResponse(order: PlacedOrder): Promise<{ status: number }>;
   refresh(order: PlacedOrder): Promise<void>;

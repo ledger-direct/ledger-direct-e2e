@@ -143,14 +143,15 @@ RUNNERS['PS-06'] = async (ctx) => {
 
 RUNNERS['PS-07'] = async (ctx) => {
   const { order } = await ctx.placeOrder(ctx.ledger.nativeAsset);
-  const forged = { ...order, secret: 'not-the-key' };
+  const forged = { ...order, secret: ctx.driver.wrongSecret?.() ?? 'not-the-key' };
   const status = await ctx.driver.statusResponse(forged);
   ctx.expect(status.status === 403, `wrong key is refused with 403 (got ${status.status})`);
   ctx.expect(!status.body.includes(order.reference) && !status.body.includes('amount') && !status.body.includes('state'), 'refusal carries no order data');
   const missing = await ctx.driver.statusResponse({ ...order, id: ctx.driver.unknownOrderId() });
   ctx.expect(missing.status === status.status && sameRefusal(missing.body, status.body), 'an unknown order is refused exactly like a wrong key');
   const page = await ctx.driver.pageResponse(forged);
-  ctx.expect(page.status >= 300 && page.status < 400, `payment page with a wrong key redirects (got ${page.status})`);
+  // Away from the page, without rendering it: a redirect on most platforms; WooCommerce answers 404, since the key is the address.
+  ctx.expect((page.status >= 300 && page.status < 400) || page.status === 404, `payment page with a wrong key is not rendered (got ${page.status})`);
 };
 
 RUNNERS['PS-09'] = async (ctx) => {

@@ -9,8 +9,7 @@ import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { balances as xrplBalances } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
-import { PrestaShopDriver } from './drivers/prestashop.js';
-import { ShopwareDriver } from './drivers/shopware.js';
+import { createDriver, TARGETS } from './drivers/factory.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
@@ -164,28 +163,24 @@ cases
 program
   .command('run')
   .description('run catalogue cases against a plugin and write the report')
-  .requiredOption('--target <plugin>', 'prestashop | shopware (woocommerce, magento: drivers pending)')
-  .option('--base-url <url>', 'how the shop is reached from here (PrestaShop default http://localhost:8080, Shopware http://localhost)')
-  .option('--compose-dir <dir>', "PrestaShop: folder with the shop's docker-compose.yml", process.env.LD_E2E_PRESTASHOP_COMPOSE_DIR ?? '.')
-  .option('--access-key <key>', 'Shopware: sales channel access key', process.env.LD_E2E_SHOPWARE_ACCESS_KEY)
-  .option('--container <name>', 'Shopware: docker container for the scheduled task', process.env.LD_E2E_SHOPWARE_CONTAINER ?? 'shopware6_672-shopware-1')
+  .requiredOption('--target <plugin>', TARGETS.join(' | '))
+  .option('--base-url <url>', 'how the shop is reached from here (default per target: LD_E2E_<TARGET>_BASE_URL or the dev-stack port)')
+  .option('--compose-dir <dir>', "PrestaShop, WooCommerce, Magento: the shop's compose folder (LD_E2E_<TARGET>_COMPOSE_DIR)")
+  .option('--compose-files <files>', 'WooCommerce: comma-separated compose files to pass with -f (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
+  .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
+  .option('--container <name>', 'Shopware: docker container for the scheduled task (LD_E2E_SHOPWARE_CONTAINER)')
   .option('--cases <ids>', 'comma-separated case IDs, "automated", or "all"', 'automated')
   .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging)')
   .option('--timeout <seconds>', 'per-case wait for a state', '240')
   .option('--report <file>', 'JSON report path', 'out/report.json')
-  .action(async (opts: { target: string; baseUrl?: string; composeDir: string; accessKey?: string; container: string; cases: string; receivingAccount?: string; timeout: string; report: string }) => {
-    let driver: PrestaShopDriver | ShopwareDriver;
-    let baseUrl: string;
-    if (opts.target === 'prestashop') {
-      baseUrl = opts.baseUrl ?? 'http://localhost:8080';
-      driver = new PrestaShopDriver({ composeDir: opts.composeDir, baseUrl });
-    } else if (opts.target === 'shopware') {
-      if (!opts.accessKey) throw new Error('Shopware needs --access-key (or LD_E2E_SHOPWARE_ACCESS_KEY): the sales channel access key');
-      baseUrl = opts.baseUrl ?? 'http://localhost';
-      driver = new ShopwareDriver({ baseUrl, accessKey: opts.accessKey, container: opts.container, adminUser: process.env.LD_E2E_SHOPWARE_ADMIN_USER, adminPassword: process.env.LD_E2E_SHOPWARE_ADMIN_PASSWORD });
-    } else {
-      throw new Error(`no driver for ${opts.target} yet — see src/drivers/driver.ts`);
-    }
+  .action(async (opts: { target: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string; cases: string; receivingAccount?: string; timeout: string; report: string }) => {
+    const { driver, baseUrl } = createDriver(opts.target, {
+      baseUrl: opts.baseUrl,
+      composeDir: opts.composeDir,
+      composeFiles: opts.composeFiles?.split(',').map((f) => f.trim()).filter(Boolean),
+      accessKey: opts.accessKey,
+      container: opts.container,
+    });
     const report = await runCases({
       driver,
       ledger: ledgerFor(chain()),
