@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { Driver, PaymentPageView, PlacedOrder, ShopConfig, StatusPayload } from './driver.js';
+import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import type { State } from '../cases/catalogue.js';
 
 const run = promisify(execFile);
@@ -57,10 +57,16 @@ export class ShopwareDriver implements Driver {
     await this.ensureTestProduct();
   }
 
-  async placeOrder(asset: string, _amountInShopCurrency: string): Promise<PlacedOrder> {
+  async findProducts(query: string): Promise<Product[]> {
+    const r = (await this.store('POST', '/store-api/search', { search: query, limit: 10 })).body as { elements?: Array<{ id: string; productNumber: string; translated?: { name?: string }; name?: string; calculatedPrice?: { totalPrice: number } }> };
+    const currency = 'EUR';
+    return (r.elements ?? []).map((p) => ({ id: p.id, number: p.productNumber, name: p.translated?.name ?? p.name ?? p.productNumber, price: String(p.calculatedPrice?.totalPrice ?? ''), currency }));
+  }
+
+  async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
     const paymentMethodId = PAYMENT_METHOD_IDS[asset];
     if (!paymentMethodId) throw new Error(`Shopware: no payment method for ${asset}`);
-    const productId = this.testProductId ?? (await this.ensureTestProduct());
+    const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     const storefrontUrl = await this.salesChannelUrl();
 
     // A guest, every time: the catalogue's PS-06 is the rule, not the exception.
@@ -79,7 +85,7 @@ export class ShopwareDriver implements Driver {
     const contextToken = register.headers.get('sw-context-token');
     if (!contextToken) throw new Error('Shopware: registration returned no context token');
 
-    await this.store('POST', '/store-api/checkout/cart/line-item', { items: [{ type: 'product', referencedId: productId, quantity: 1 }] }, contextToken);
+    await this.store('POST', '/store-api/checkout/cart/line-item', { items: [{ type: 'product', referencedId: productId, quantity: options.quantity ?? 1 }] }, contextToken);
     await this.store('PATCH', '/store-api/context', { paymentMethodId }, contextToken);
     const order = (await this.store('POST', '/store-api/checkout/order', {}, contextToken)).body as { id: string; orderNumber: string; deepLinkCode: string };
     const payment = (await this.store('POST', '/store-api/handle-payment', {

@@ -37,7 +37,9 @@ export interface PaymentRequest {
 
 export interface PaymentResult {
   hash: string;
+  /** Chain-specific result code (tesSUCCESS, tecPATH_PARTIAL, success, failed …). */
   result: string;
+  /** True only when the payment succeeded on the ledger — a recorded failure is not validated here. */
   validated: boolean;
   delivered: string | null;
   explorer: string;

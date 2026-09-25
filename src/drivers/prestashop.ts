@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { Driver, PaymentPageView, PlacedOrder, ShopConfig, StatusPayload } from './driver.js';
+import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import type { State } from '../cases/catalogue.js';
 
 const run = promisify(execFile);
@@ -36,8 +36,16 @@ export class PrestaShopDriver implements Driver {
     this.cronUrl = this.rebase(r.cron_url);
   }
 
-  async placeOrder(asset: string, _amountInShopCurrency: string): Promise<PlacedOrder & { pollUrl: string; pageUrl: string; cronUrl: string }> {
-    const r = (await this.helper('create-order', { asset })) as { id_order: number; reference: string; key: string; page: string; poll: string; cron: string };
+  async findProducts(query: string): Promise<Product[]> {
+    const r = (await this.helper('find-products', { query })) as { products: Array<{ id_product: number; reference: string; name: string; price: string; currency: string }> };
+    return r.products.map((p) => ({ id: String(p.id_product), number: p.reference, name: p.name, price: p.price, currency: p.currency }));
+  }
+
+  async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder & { pollUrl: string; pageUrl: string; cronUrl: string }> {
+    const args: Record<string, string> = { asset };
+    if (options.productId) args.product = options.productId;
+    if (options.quantity) args.quantity = String(options.quantity);
+    const r = (await this.helper('create-order', args)) as { id_order: number; reference: string; key: string; page: string; poll: string; cron: string };
     this.cronUrl = this.rebase(r.cron);
     return { id: String(r.id_order), reference: r.reference, secret: r.key, pollUrl: this.rebase(r.poll), pageUrl: this.rebase(r.page), cronUrl: this.cronUrl };
   }

@@ -230,6 +230,14 @@ reportCmd
     out({ replaced: merged.replaced, added: merged.missing }, () => `updated ${opts.repo}#${opts.pr}: replaced ${merged.replaced.join(', ') || 'nothing'}, added ${merged.missing.join(', ') || 'nothing'}`);
   });
 
+program
+  .command('mcp')
+  .description('serve the same functions as MCP tools over stdio (see scripts/ld-e2e-mcp for the wallet environment)')
+  .action(async () => {
+    const { serveStdio } = await import('./mcp.js');
+    await serveStdio();
+  });
+
 program.parseAsync(process.argv).catch((error: unknown) => {
   const message = error instanceof Error ? error.message : String(error);
   process.stderr.write(redact(message) + '\n');

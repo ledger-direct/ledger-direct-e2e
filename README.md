@@ -106,6 +106,32 @@ with a case ID is replaced by the report's line for that case: ticked when it pa
 reference and hashes; left open with the reason when it failed. Lines without an ID and every other
 section are untouched; a second run replaces its own lines. It runs as you, through `gh`.
 
+## MCP server
+
+The same functions as tools for a coding session or an agent — `ld-e2e mcp` speaks MCP over stdio.
+Register it in Claude Code through the wrapper that loads the wallet file into the process
+environment (seeds never go into an MCP configuration):
+
+```
+claude mcp add ledger-direct-e2e -- /path/to/ledger-direct-e2e/scripts/ld-e2e-mcp
+```
+
+Give the server the shops it may talk to through the environment (in the same file):
+`LD_E2E_PRESTASHOP_COMPOSE_DIR`, `LD_E2E_PRESTASHOP_BASE_URL`, `LD_E2E_SHOPWARE_ACCESS_KEY`,
+`LD_E2E_SHOPWARE_BASE_URL`, and optionally `LD_E2E_MAX_PAYMENT` (default 50).
+
+| Group | Tools |
+|---|---|
+| Shopping and paying | `shop_search_products`, `shop_place_order`, `shop_pay_order`, `shop_order_status`, `shop_wait_for`, `shop_order_evidence` |
+| Wallets | `wallet_status`, `wallet_fresh` (address only), `wallet_fund`, `pay` |
+| Catalogue | `list_cases`, `run_cases` (background job), `job_status`, `report_pr` |
+
+"Order two mugs on the PrestaShop dev shop and pay in RLUSD" is four tool calls: search, place,
+pay, wait — and the answer carries the transaction hash, the explorer link and what the shop
+recorded. The rules every tool keeps: testnet only; no seed ever leaves the server; a payment above
+`LD_E2E_MAX_PAYMENT` is refused, not questioned; a payment the ledger rejected is an error, never a
+success with a hash.
+
 ## Wallets
 
 ```
@@ -133,7 +159,9 @@ repository — not in a test, not as a sample.
 ## Status
 
 0.1.0. Ten cases automated and green against PrestaShop and Shopware on XRPL with real testnet
-transactions; Stellar wired and verified on the ledger side. Next: an MCP server over the same
-functions so a coding session can run a case as a tool, then WooCommerce and Magento, then nightly runs.
+transactions; Stellar wired and verified on the ledger side; the MCP server drives the same
+functions, verified with a two-item RLUSD order placed, paid and settled through the tools. Next:
+WooCommerce and Magento drivers, then nightly runs. A mainnet mode follows once the canary token
+exists — a separate decision, not a flag.
 
 MIT.

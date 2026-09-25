@@ -39,7 +39,7 @@ export class CaseContext {
   }
 
   async placeOrder(asset: string): Promise<{ order: PlacedOrder; page: PaymentPageView }> {
-    const order = await this.driver.placeOrder(asset, '');
+    const order = await this.driver.placeOrder(asset);
     const page = await this.driver.paymentPage(order);
     this.evidence.push({ kind: 'order', text: `order ${order.reference} (#${order.id}), page shows ${page.amountDisplayed} ${page.asset} to ${page.destinationAccount} id ${page.paymentIdentifier}, state ${page.state}` });
     this.log(`order ${order.reference}: ${page.amountDisplayed} ${page.asset}, id ${page.paymentIdentifier}`);

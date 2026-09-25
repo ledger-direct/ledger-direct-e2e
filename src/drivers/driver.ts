@@ -15,6 +15,21 @@ export interface ShopConfig {
   quoteExpirySeconds: number;
 }
 
+export interface Product {
+  id: string;
+  number: string;
+  name: string;
+  /** Gross unit price as the shop shows it, in the shop currency. */
+  price: string;
+  currency: string;
+}
+
+export interface OrderOptions {
+  /** A product from findProducts(); the driver's cheap test article when absent. */
+  productId?: string;
+  quantity?: number;
+}
+
 export interface PlacedOrder {
   id: string;
   reference: string;
@@ -47,7 +62,9 @@ export interface StatusPayload {
 export interface Driver {
   readonly name: 'prestashop' | 'shopware' | 'woocommerce' | 'magento';
   configure(config: ShopConfig): Promise<void>;
-  placeOrder(asset: string, amountInShopCurrency: string): Promise<PlacedOrder>;
+  /** Products matching a free-text query, the way a customer would search. */
+  findProducts(query: string): Promise<Product[]>;
+  placeOrder(asset: string, options?: OrderOptions): Promise<PlacedOrder>;
   paymentPage(order: PlacedOrder): Promise<PaymentPageView>;
   status(order: PlacedOrder): Promise<StatusPayload>;
   /** The raw answer of the status endpoint — for the cases that expect a refusal (PS-07). */

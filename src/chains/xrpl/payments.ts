@@ -53,10 +53,13 @@ export async function pay(client: Client, request: PaymentRequest): Promise<Paym
   const meta = response.result.meta;
   const metaObject = typeof meta === 'object' && meta !== null ? (meta as { TransactionResult?: string; delivered_amount?: unknown }) : {};
 
+  const result = String(metaObject.TransactionResult ?? 'unknown');
+
   return {
     hash: response.result.hash,
-    result: String(metaObject.TransactionResult ?? 'unknown'),
-    validated: Boolean(response.result.validated),
+    result,
+    // A tec* result is validated *and* failed (fee charged, nothing delivered); only tesSUCCESS counts.
+    validated: Boolean(response.result.validated) && result === 'tesSUCCESS',
     delivered: describeDelivered(metaObject.delivered_amount),
     explorer: TESTNET_EXPLORER_TX + response.result.hash,
     from: wallet.classicAddress,

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Starts the MCP server with the testnet wallets in its environment.
+#
+# Seeds never live in a repository or in an MCP configuration file; this
+# wrapper loads the central file (outside every repo) into the process
+# environment and hands over to the server. Register it in Claude Code with:
+#   claude mcp add ledger-direct-e2e -- /path/to/ledger-direct-e2e/scripts/ld-e2e-mcp
+set -euo pipefail
+ENV_FILE="${LEDGERDIRECT_TESTNET_ENV:-$HOME/.config/ledger-direct/testnet.env}"
+if [ -f "$ENV_FILE" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  source "$ENV_FILE"
+  set +a
+fi
+exec node "$(cd "$(dirname "$0")/.." && pwd)/dist/cli.js" mcp
