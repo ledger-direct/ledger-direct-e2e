@@ -1,4 +1,4 @@
-import { Client, Wallet, TrustSet } from 'xrpl';
+import { Client, Wallet, TrustSet, TrustSetFlags } from 'xrpl';
 import { ASSETS, Asset, TESTNET_FAUCET, TESTNET_ISSUED, assetFromCurrency } from './assets.js';
 
 export interface Balances {
@@ -26,7 +26,11 @@ export async function faucet(destination?: string): Promise<{ address: string; s
   return { address, seed: body.seed, amount: Number(body.amount ?? body.balance ?? 0) };
 }
 
-/** Trust lines to the testnet issuers, one TrustSet per asset; idempotent on the ledger. */
+/**
+ * Trust lines to the testnet issuers, one TrustSet per asset; idempotent on
+ * the ledger. With NoRipple: these accounts hold tokens, they do not route
+ * them, and a wallet like Xaman flags a line that ripples as misconfigured.
+ */
 export async function setTrustlines(client: Client, wallet: Wallet, assets: Exclude<Asset, 'XRP'>[] = ['RLUSD', 'USDC'], limit = '1000000'): Promise<Record<string, string>> {
   const results: Record<string, string> = {};
   for (const asset of assets) {
@@ -35,6 +39,7 @@ export async function setTrustlines(client: Client, wallet: Wallet, assets: Excl
       TransactionType: 'TrustSet',
       Account: wallet.classicAddress,
       LimitAmount: { currency: issued.currency, issuer: issued.issuer, value: limit },
+      Flags: TrustSetFlags.tfSetNoRipple,
     };
     const prepared = await client.autofill(tx);
     const result = await client.submitAndWait(wallet.sign(prepared).tx_blob);
