@@ -207,3 +207,33 @@ RUNNERS['PS-02'] = async (ctx) => {
     await ctx.reconfigure({});
   }
 };
+
+/**
+ * The platform's payment session — Shopware's payment token, a checkout
+ * session elsewhere — outlives no long lunch break: 30 minutes in Shopware.
+ * A customer who pays after that used to leave a paid ledger and an open
+ * order, because the only place that set "paid" was the return over that
+ * session. The status endpoint settles it now, and sends the customer to a
+ * page that still works rather than into the platform's "expired" error.
+ *
+ * Nightly only: the wait is the test.
+ */
+RUNNERS['PS-10'] = async (ctx) => {
+  const waitMinutes = 35;
+  const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
+  ctx.note(`waiting ${waitMinutes} minutes for the platform's payment session to expire`);
+  await sleep(waitMinutes * 60 * 1000);
+  const before = await ctx.driver.status(order);
+  ctx.expect(before.redirect === undefined, 'the order still waits after the pause');
+  await ctx.pay(page, page.amountDisplayed);
+  const settled = await ctx.pollUntil(order, (s) => s.redirect !== undefined, 'redirect after the late payment');
+  ctx.expect(settled.state === 'settled', 'status endpoint settles without any return trip');
+  const redirect = settled.redirect as string;
+  ctx.note(`redirect: ${redirect}`);
+  ctx.expect(!/finalize-transaction|_sw_payment_token=/.test(redirect), 'redirect does not lead into the expired return URL');
+  const landing = await fetch(redirect, { redirect: 'manual', headers: { Accept: 'text/html' } });
+  ctx.expect(landing.status < 400, `the redirect target answers ${landing.status}, not an error page`);
+  const evidence = await platformState(ctx, order);
+  ctx.expect(evidence.paid === true, 'order is in the paid state');
+  ctx.expect(evidence.payments === 1, 'exactly one payment record');
+};
