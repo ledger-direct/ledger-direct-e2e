@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
-import type { State } from '../cases/catalogue.js';
+import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
 
@@ -104,19 +104,9 @@ export class ShopwareDriver implements Driver {
     const response = await fetch(this.pageUrl(order), { redirect: 'manual' });
     if (response.status !== 200) throw new Error(`Shopware: payment page answered ${response.status}`);
     const html = await response.text();
-    const state = attr(html, 'data-ld-state');
-    const amount = html.match(/id="(?:xrp|token)-amount"[^>]*value="([^"]+)"/) ?? html.match(/value="([^"]+)"[^>]*id="(?:xrp|token)-amount"/);
-    const account = html.match(/id="destination-account"[^>]*data-value="([^"]+)"/);
-    const tag = html.match(/id="destination-tag"[^>]*data-value="(\d+)"/);
-    if (!state || !amount || !account || !tag) throw new Error(`Shopware: payment page for order ${order.id} did not render the expected fields`);
-    return {
-      state: state as State,
-      amountDisplayed: amount[1].trim(),
-      asset: this.secretOf.get(order.id)?.asset ?? 'XRP',
-      destinationAccount: account[1].trim(),
-      paymentIdentifier: tag[1],
-      statusUrl: this.statusUrl(order),
-    };
+    const page = readPaymentPage(html);
+    if (!page) throw new Error(`Shopware: payment page for order ${order.id} did not render the markup contract`);
+    return { ...page, asset: page.asset ?? this.secretOf.get(order.id)?.asset ?? 'XRP', statusUrl: this.statusUrl(order) };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {
@@ -301,7 +291,3 @@ export class ShopwareDriver implements Driver {
   }
 }
 
-function attr(html: string, name: string): string | undefined {
-  const m = html.match(new RegExp(`${name}="([^"]*)"`));
-  return m?.[1];
-}

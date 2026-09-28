@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
-import type { State } from '../cases/catalogue.js';
+import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
 
@@ -53,19 +53,9 @@ export class PrestaShopDriver implements Driver {
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
     const url = `${this.options.baseUrl}/module/ledgerdirect/payment?id_order=${order.id}&key=${order.secret}`;
     const html = await (await fetch(url, { redirect: 'manual' })).text();
-    const state = attr(html, 'data-ld-state');
-    const amount = html.match(/<dt>Amount<\/dt>\s*<dd>\s*<code>([^<]+)<\/code>\s*([A-Z]+)/);
-    const account = html.match(/<dt>Destination account<\/dt>\s*<dd><code>([^<]+)<\/code>/);
-    const tag = html.match(/<dt>Destination tag<\/dt>\s*<dd><code>(\d+)<\/code>/);
-    if (!state || !amount || !account || !tag) throw new Error(`payment page for order ${order.id} did not render the expected fields`);
-    return {
-      state: state as State,
-      amountDisplayed: amount[1].trim(),
-      asset: amount[2],
-      destinationAccount: account[1].trim(),
-      paymentIdentifier: tag[1],
-      statusUrl: attr(html, 'data-ld-poll-url')?.replace(/&amp;/g, '&') ?? `${this.options.baseUrl}/module/ledgerdirect/poll?id_order=${order.id}&key=${order.secret}`,
-    };
+    const page = readPaymentPage(html);
+    if (!page) throw new Error(`PrestaShop: payment page for order ${order.id} did not render the markup contract`);
+    return { ...page, asset: page.asset ?? 'XRP', statusUrl: page.pollUrl ?? `${this.options.baseUrl}/module/ledgerdirect/poll?id_order=${order.id}&key=${order.secret}` };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {
@@ -135,7 +125,3 @@ export class PrestaShopDriver implements Driver {
   }
 }
 
-function attr(html: string, name: string): string | undefined {
-  const m = html.match(new RegExp(`${name}="([^"]*)"`));
-  return m?.[1];
-}
