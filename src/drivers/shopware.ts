@@ -271,7 +271,7 @@ export class ShopwareDriver implements Driver {
     return { body: text ? JSON.parse(text) : null, headers: response.headers };
   }
 
-  private async admin(method: string, path: string, body?: unknown): Promise<unknown> {
+  private async admin(method: string, path: string, body?: unknown, retry = true): Promise<unknown> {
     const token = await this.token();
     const response = await fetch(`${this.options.baseUrl}${path}`, {
       method,
@@ -279,6 +279,11 @@ export class ShopwareDriver implements Driver {
       body: body === undefined ? undefined : JSON.stringify(body),
     });
     const text = await response.text();
+    if (response.status === 401 && retry) {
+      // The access token lives ten minutes; a case that waits longer (PS-10) outlives it.
+      this.adminToken = undefined;
+      return this.admin(method, path, body, false);
+    }
     if (!response.ok) throw new Error(`Shopware admin-api ${method} ${path} answered ${response.status}: ${text.slice(0, 300)}`);
     return text ? JSON.parse(text) : null;
   }
