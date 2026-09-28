@@ -85,6 +85,15 @@ payment page (state, **displayed** amount, account, tag), read the status endpoi
 expired quote, close an order, trigger the safety net, count node requests. Everything on the
 ledger side is shared; the catalogue never changes per platform.
 
+The payment page is read by one function for all platforms, `readPaymentPage()` in
+`src/drivers/page.ts`, through the markup contract of
+[`@ledger-direct/payment-ui`](https://github.com/ledger-direct/ledger-direct-payment-ui) (`src/README.md`
+there): `data-ld-state`, `data-ld-amount-requested` and `data-ld-asset` on the root, `[data-ld-account]`
+and `[data-ld-tag]` by their `data-value`, `data-ld-poll-url` for the status endpoint. A driver never
+parses a platform id or a label. Pages from before the contract (WooCommerce, Magento, PrestaShop
+until their payment-page rewrite) are read by the fallback at the bottom of `page.ts`, which goes
+when the last of them is gone.
+
 | Platform | Driver | Notes |
 |---|---|---|
 | PrestaShop 9 | `prestashop.ts` | orders through the module's `dev/bin/e2e.php` inside the shop container; everything a customer does is HTTP |

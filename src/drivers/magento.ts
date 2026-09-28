@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
-import type { State } from '../cases/catalogue.js';
+import { readPaymentPage } from './page.js';
 
 export interface MagentoOptions {
   /** How the shop is reached over HTTP from this machine, e.g. https://localhost:8444 */
@@ -126,19 +126,9 @@ echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.ass
     const response = await fetch(this.pageUrl(order), { redirect: 'manual' });
     if (response.status !== 200) throw new Error(`Magento: payment page answered ${response.status}`);
     const html = await response.text();
-    const state = attr(html, 'data-ld-state');
-    const amount = html.match(/id="(?:xrp|token)-amount"[^>]*value="([^"]+)"/);
-    const account = html.match(/id="destination-account"[^>]*data-value="([^"]+)"/);
-    const tag = html.match(/id="destination-tag"[^>]*data-value="(\d+)"/);
-    if (!state || !amount || !account || !tag) throw new Error(`Magento: payment page for order ${order.id} did not render the expected fields`);
-    return {
-      state: state as State,
-      amountDisplayed: amount[1].trim(),
-      asset: this.assetOf.get(order.id) ?? 'XRP',
-      destinationAccount: account[1].trim(),
-      paymentIdentifier: tag[1],
-      statusUrl: this.statusUrl(order),
-    };
+    const page = readPaymentPage(html);
+    if (!page) throw new Error(`Magento: payment page for order ${order.id} did not render the markup contract`);
+    return { ...page, asset: page.asset ?? this.assetOf.get(order.id) ?? 'XRP', statusUrl: this.statusUrl(order) };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {
@@ -351,7 +341,3 @@ echo json_encode([
   }
 }
 
-function attr(html: string, name: string): string | undefined {
-  const m = html.match(new RegExp(`${name}="([^"]*)"`));
-  return m?.[1];
-}
