@@ -6,10 +6,8 @@ import type { State } from '../cases/catalogue.js';
  * `data-ld-asset` on the root, `[data-ld-account]` and `[data-ld-tag]` by their
  * `data-value`, `data-ld-poll-url` for the status endpoint. No driver parses
  * platform ids or labels; a platform that renders the contract is readable.
- *
- * Until every plugin renders the contract, the pre-contract pages are read
- * too — see readLegacyPage() at the bottom, which goes when the last of them
- * is gone.
+ * Since 2026-09-28 all four plugins do (Shopware 1.4.2, PrestaShop 0.5.0,
+ * Magento 1.1.0, WooCommerce 1.3.0); the reader for their earlier pages is gone.
  */
 export interface PaymentPageFields {
   state: State;
@@ -28,7 +26,7 @@ const STATES: readonly State[] = ['waiting', 'partial', 'wrong_asset', 'settled'
 export function readPaymentPage(html: string): PaymentPageFields | undefined {
   const state = attr(html, 'data-ld-state');
   if (!state || !isState(state)) return undefined;
-  return readContractPage(html, state) ?? readLegacyPage(html, state);
+  return readContractPage(html, state);
 }
 
 function readContractPage(html: string, state: State): PaymentPageFields | undefined {
@@ -78,32 +76,4 @@ function isState(value: string): value is State {
 
 function decode(value: string): string {
   return value.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
-}
-
-// ---------------------------------------------------------------------------
-// Pre-contract pages. WooCommerce and Magento still render the hidden inputs
-// `#xrp-amount` / `#token-amount` and `#destination-account` / `#destination-tag`
-// with `data-value`; PrestaShop before its payment-page rewrite renders
-// `<dt>Amount</dt><dd><code>…</code> XRP`. Delete this when all four render
-// the contract — the tests in tests/page.test.ts name which fixture is which.
-// ---------------------------------------------------------------------------
-
-function readLegacyPage(html: string, state: State): PaymentPageFields | undefined {
-  const pollUrl = attr(html, 'data-ld-poll-url');
-  const withPoll = (fields: Omit<PaymentPageFields, 'pollUrl'>): PaymentPageFields => (pollUrl ? { ...fields, pollUrl } : fields);
-
-  const amount = html.match(/id="(?:xrp|token)-amount"[^>]*\svalue="([^"]+)"/) ?? html.match(/\svalue="([^"]+)"[^>]*id="(?:xrp|token)-amount"/);
-  const account = html.match(/id="destination-account"[^>]*\sdata-value="([^"]+)"/);
-  const tag = html.match(/id="destination-tag"[^>]*\sdata-value="(\d+)"/);
-  if (amount && account && tag) {
-    return withPoll({ state, amountDisplayed: decode(amount[1]).trim(), destinationAccount: decode(account[1]).trim(), paymentIdentifier: tag[1] });
-  }
-
-  const dtAmount = html.match(/<dt>Amount<\/dt>\s*<dd>\s*<code>([^<]+)<\/code>\s*([A-Z]+)/);
-  const dtAccount = html.match(/<dt>Destination account<\/dt>\s*<dd><code>([^<]+)<\/code>/);
-  const dtTag = html.match(/<dt>Destination tag<\/dt>\s*<dd><code>(\d+)<\/code>/);
-  if (dtAmount && dtAccount && dtTag) {
-    return withPoll({ state, amountDisplayed: dtAmount[1].trim(), asset: dtAmount[2], destinationAccount: dtAccount[1].trim(), paymentIdentifier: dtTag[1] });
-  }
-  return undefined;
 }
