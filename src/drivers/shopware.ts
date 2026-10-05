@@ -40,6 +40,7 @@ export class ShopwareDriver implements Driver {
   private adminToken?: string;
   private readonly secretOf = new Map<string, { deepLinkCode: string; returnUrl: string; asset: string }>();
   private storefrontUrl?: string;
+  private domain?: { url: string; salesChannelId: string };
   private testProductId?: string;
 
   constructor(private readonly options: ShopwareOptions) {}
@@ -54,7 +55,21 @@ export class ShopwareDriver implements Driver {
         [CONFIG_PREFIX + 'xrplQuoteExpiry']: config.quoteExpirySeconds,
       },
     });
+    await this.enablePaymentMethods();
     await this.ensureTestProduct();
+  }
+
+  /**
+   * A fresh shop has the plugin's three payment methods inactive and assigned to no
+   * sales channel — plugin:install creates them, the merchant switches them on. The
+   * harness does what the merchant would, for the sales channel of its base URL, so
+   * a throwaway shop (the nightly run) is ready without a hand in the admin.
+   */
+  private async enablePaymentMethods(): Promise<void> {
+    const salesChannelId = await this.salesChannelId();
+    for (const id of Object.values(PAYMENT_METHOD_IDS)) {
+      await this.admin('PATCH', `/api/payment-method/${id}`, { active: true, salesChannels: [{ id: salesChannelId }] });
+    }
   }
 
   async findProducts(query: string): Promise<Product[]> {
@@ -210,13 +225,23 @@ export class ShopwareDriver implements Driver {
   }
 
   private async salesChannelUrl(): Promise<string> {
-    if (this.storefrontUrl) return this.storefrontUrl;
+    return (await this.salesChannelDomain()).url;
+  }
+
+  private async salesChannelId(): Promise<string> {
+    return (await this.salesChannelDomain()).salesChannelId;
+  }
+
+  /** The sales channel domain the base URL belongs to — the storefront the harness buys from. */
+  private async salesChannelDomain(): Promise<{ url: string; salesChannelId: string }> {
+    if (this.domain) return this.domain;
     const found = (await this.admin('POST', '/api/search/sales-channel-domain', { limit: 50 })) as { data: Array<{ url: string; salesChannelId: string }> };
     const base = new URL(this.options.baseUrl);
     const match = found.data.find((d) => d.url.startsWith(`${base.protocol}//${base.host}`)) ?? found.data[0];
     if (!match) throw new Error('Shopware: no sales channel domain found');
+    this.domain = { url: match.url, salesChannelId: match.salesChannelId };
     this.storefrontUrl = match.url;
-    return match.url;
+    return this.domain;
   }
 
   /** A 1.00 EUR article, created once: the catalogue wants small orders, where rounding bites hardest. */
