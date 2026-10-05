@@ -80,6 +80,8 @@ A third chain is one class behind the contract, one entry in `ledgerFor()`, one 
 
 ## Drivers
 
+How the whole of LedgerDirect is tested across the core, the shared page package and the four plugins — the layers, what each catches, the nightly end-to-end runs and the manual cases — is in [`docs/testing.md` of the core](https://github.com/ledger-direct/ledger-direct-core-php/blob/master/docs/testing.md).
+
 A platform is eight methods (`src/drivers/driver.ts`): configure the shop, place an order, read the
 payment page (state, **displayed** amount, account, tag), read the status endpoint, refresh an
 expired quote, close an order, trigger the safety net, count node requests. Everything on the
