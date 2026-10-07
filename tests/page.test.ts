@@ -29,33 +29,6 @@ const shopware140 = `
   <span class="ld-field-value" id="destination-tag" data-ld-tag data-value="4264383458">4264383458</span>
 </div>`;
 
-// WooCommerce and Magento before their payment-page rewrite.
-const hiddenInputs = `
-<div class="ledger-direct" data-ld-state="expired">
-  <input id="xrp-amount"
-         type="hidden"
-         name="xrp-amount"
-         value="0.85635">
-  <input id="token-amount" type="hidden" name="token-amount" value="">
-  <div id="destination-account" class="" data-value="rJdfC6X2L6tTURK7h214Q3MW3a4RrbzCa8">rJdf…</div>
-  <div id="destination-tag" class="" data-value="3050405045">3050405045</div>
-</div>`;
-
-// PrestaShop before its payment-page rewrite.
-const definitionList = `
-<section data-ld-state="partial" data-ld-poll-url="http://localhost:8080/module/ledgerdirect/poll?id_order=12&amp;key=k">
-  <dl>
-    <dt>Amount</dt>
-    <dd>
-      <code>2.5</code> USDC
-    </dd>
-    <dt>Destination account</dt>
-    <dd><code>rGT9kXUuutRVGrUyRciupE8VbRWqL4fUPo</code></dd>
-    <dt>Destination tag</dt>
-    <dd><code>77</code></dd>
-  </dl>
-</section>`;
-
 describe('readPaymentPage', () => {
   it('reads the contract: root attributes, data-value on account and tag', () => {
     expect(readPaymentPage(contract)).toEqual({
@@ -82,24 +55,9 @@ describe('readPaymentPage', () => {
     expect(readPaymentPage(noAmountValue)).toBeUndefined();
   });
 
-  it('still reads the hidden-input pages of WooCommerce and Magento', () => {
-    expect(readPaymentPage(hiddenInputs)).toEqual({
-      state: 'expired',
-      amountDisplayed: '0.85635',
-      destinationAccount: 'rJdfC6X2L6tTURK7h214Q3MW3a4RrbzCa8',
-      paymentIdentifier: '3050405045',
-    });
-  });
-
-  it("still reads PrestaShop's definition list, asset included", () => {
-    expect(readPaymentPage(definitionList)).toEqual({
-      state: 'partial',
-      amountDisplayed: '2.5',
-      asset: 'USDC',
-      destinationAccount: 'rGT9kXUuutRVGrUyRciupE8VbRWqL4fUPo',
-      paymentIdentifier: '77',
-      pollUrl: 'http://localhost:8080/module/ledgerdirect/poll?id_order=12&key=k',
-    });
+  it('does not fall back to platform ids any more', () => {
+    const legacyOnly = `<div data-ld-state="waiting"><input id="xrp-amount" type="hidden" value="1"><div id="destination-account" data-value="rX"></div><div id="destination-tag" data-value="7"></div></div>`;
+    expect(readPaymentPage(legacyOnly)).toBeUndefined();
   });
 
   it('refuses a page without a known state or without the fields', () => {

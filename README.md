@@ -92,9 +92,8 @@ The payment page is read by one function for all platforms, `readPaymentPage()` 
 [`@ledger-direct/payment-ui`](https://github.com/ledger-direct/ledger-direct-payment-ui) (`src/README.md`
 there): `data-ld-state`, `data-ld-amount-requested` and `data-ld-asset` on the root, `[data-ld-account]`
 and `[data-ld-tag]` by their `data-value`, `data-ld-poll-url` for the status endpoint. A driver never
-parses a platform id or a label. Pages from before the contract (WooCommerce, Magento, PrestaShop
-until their payment-page rewrite) are read by the fallback at the bottom of `page.ts`, which goes
-when the last of them is gone.
+parses a platform id or a label; all four plugins render the contract (Shopware 1.4.2, PrestaShop 0.5.0,
+Magento 1.1.0, WooCommerce 1.3.0).
 
 | Platform | Driver | Notes |
 |---|---|---|
