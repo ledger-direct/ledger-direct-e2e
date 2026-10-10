@@ -163,6 +163,17 @@ export class ShopwareDriver implements Driver {
     return { ran: SCHEDULED_TASK, output: (stdout + stderr).trim().split('\n').slice(-3) };
   }
 
+  /** The plugin's transaction table, read in the dockware container (root/root is dockware's default). */
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+    if (!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(destinationAccount) || !/^\d+$/.test(paymentIdentifier)) {
+      throw new Error('Shopware: recordedHashes() takes an XRPL address and a numeric destination tag');
+    }
+    const container = this.options.container ?? 'shopware6_672-shopware-1';
+    const sql = `SELECT hash FROM ledger_direct_xrpl_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
+    const { stdout } = await run('docker', ['exec', container, 'bash', '-lc', `mysql -h 127.0.0.1 -u root -proot shopware -N -e "${sql}" 2>/dev/null`]);
+    return stdout.split('\n').map((l) => l.trim()).filter((l) => l !== '');
+  }
+
   /**
    * The plugin logs one debug line per actual ledger sync ("LedgerDirect: ledger synced"),
    * in dev.log when APP_ENV=dev. Counting those lines is the observable PS-08 needs; the

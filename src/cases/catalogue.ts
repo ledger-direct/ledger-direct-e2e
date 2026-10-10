@@ -37,8 +37,8 @@ export const CASES: readonly CaseSpec[] = [
     expects: ['order settles without a poll'] },
   { id: 'PS-10', title: 'Late return after the checkout session is gone', asset: 'XRP', summary: 'Pay 35 minutes after checkout.',
     expects: ['status endpoint settles', 'redirect goes to an order page, not an expired return URL'], nightlyOnly: true },
-  { id: 'PS-11', title: 'Closed by the merchant', asset: 'XRP', summary: 'Merchant cancels, customer pays anyway.',
-    expects: ['redirect present', 'no state change back to open'] },
+  { id: 'PS-11', title: 'Closed by the merchant', asset: 'XRP', summary: 'Merchant cancels, customer pays anyway, the safety net runs.',
+    expects: ['redirect present', 'no state change back to open', 'after the safety net the payment is on record for the merchant'] },
 ];
 
 export function findCase(id: string): CaseSpec | undefined {
