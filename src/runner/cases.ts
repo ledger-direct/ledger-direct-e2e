@@ -115,21 +115,30 @@ export function statusValue(s: StatusPayload, key: 'amount_paid' | 'shortfall'):
 }
 
 RUNNERS['PS-04'] = async (ctx) => {
+  // Within the asset class: a token order paid in the other token.
   const [quoted, other] = ctx.wrongAssetPair();
+  await wrongAssetThenTheRightOne(ctx, quoted, other);
+  // Across the asset class: a native order paid in a token. Until core 0.8.1 the sync threw that
+  // candidate away as a class mismatch and the page stayed on "waiting" with the money on the tag.
+  await wrongAssetThenTheRightOne(ctx, ctx.ledger.nativeAsset, other);
+};
+
+async function wrongAssetThenTheRightOne(ctx: CaseContext, quoted: string, other: string): Promise<void> {
   const { order, page } = await ctx.placeOrder(quoted);
   ctx.expect(page.asset === quoted, `order is quoted in ${quoted}`);
-  // The same number, but in another token: the customer's wallet reports success, the shop credits nothing.
+  // The same number, but in another asset: the customer's wallet reports success, the shop credits nothing.
   await ctx.pay(page, page.amountDisplayed, other);
-  const wrong = await ctx.pollUntil(order, (s) => s.state === 'wrong_asset', 'wrong_asset');
-  ctx.expect(statusValue(wrong, 'shortfall') !== null && Number(statusValue(wrong, 'shortfall')) === Number(page.amountDisplayed), 'shortfall is the full request');
+  const wrong = await ctx.pollUntil(order, (s) => s.state === 'wrong_asset', `wrong_asset (${other} on a ${quoted} order)`);
+  ctx.expect(statusValue(wrong, 'shortfall') !== null && Number(statusValue(wrong, 'shortfall')) === Number(page.amountDisplayed), `shortfall is the full ${quoted} request`);
+  ctx.expect(statusValue(wrong, 'amount_paid') !== null, `amount_paid names what arrived (${other})`);
   ctx.expect(wrong.redirect === undefined, 'no redirect while nothing is credited');
   const seen = await platformState(ctx, order);
   ctx.expect(seen.paid === false && seen.incomplete === true, 'merchant sees the incomplete state');
   await ctx.pay(page, page.amountDisplayed, quoted);
-  const settled = await ctx.pollUntil(order, (s) => s.redirect !== undefined, 'redirect after the right token');
+  const settled = await ctx.pollUntil(order, (s) => s.redirect !== undefined, `redirect after the right asset (${quoted})`);
   ctx.expect(settled.state === 'settled', `${quoted} settles the order`);
   ctx.expect((await platformState(ctx, order)).paid === true, 'order is in the paid state');
-};
+}
 
 RUNNERS['PS-06'] = async (ctx) => {
   // The harness holds no session cookie: everything it does, it does as a guest with the key.

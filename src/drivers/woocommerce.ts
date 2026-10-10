@@ -192,7 +192,9 @@ $hash = $order->get_transaction_id();
 echo json_encode([
   'id_order' => $order->get_id(),
   'reference' => $order->get_order_number(),
-  'state' => ['name' => $status, 'is_paid' => $paid, 'is_incomplete' => $status === 'pending' && !empty($intent['amount_paid']), 'is_awaiting' => $status === 'pending'],
+  // Since plugin 1.4.0 a payment that does not settle moves the order to its own status, ld-incomplete
+  // ("XRPL payment incomplete"); before, it stayed pending and only the intent told.
+  'state' => ['name' => $status, 'is_paid' => $paid, 'is_incomplete' => $status === 'ld-incomplete' || ($status === 'pending' && !empty($intent['amount_paid'])), 'is_awaiting' => in_array($status, ['pending', 'ld-incomplete'], true)],
   'payments' => $hash ? [['transaction_id' => $hash]] : [],
   'total_paid_real' => $paid ? $order->get_total() : '0',
   'intent' => $intent,
