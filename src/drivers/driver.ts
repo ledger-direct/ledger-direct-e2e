@@ -84,6 +84,12 @@ export interface Driver {
   /** Whatever settles orders without a browser: cron URL, scheduled task, WP-cron. Returns what it answered. */
   safetyNet(): Promise<unknown>;
   /**
+   * Every transaction hash the shop has stored for this receiving account and payment
+   * identifier — what the merchant can see in the order panel. How PS-11 proves that a
+   * payment on a cancelled order is on record once the safety net has run.
+   */
+  recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]>;
+  /**
    * A value that changes exactly when the platform synced with the node — how PS-08 is
    * proven. Null when the platform cannot expose it; the case then falls back to timing.
    */

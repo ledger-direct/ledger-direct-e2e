@@ -183,11 +183,17 @@ RUNNERS['PS-11'] = async (ctx) => {
   const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
   await ctx.driver.close(order);
   ctx.note('merchant cancelled the order');
-  await ctx.pay(page, page.amountDisplayed);
+  const paid = await ctx.pay(page, page.amountDisplayed);
   const status = await ctx.driver.status(order);
   ctx.expect(status.redirect !== undefined, 'poll redirects for a closed order');
   const seen = await platformState(ctx, order);
   ctx.expect(seen.paid === false, 'the payment does not reopen or pay a cancelled order');
+  // Nothing open points at the account any more; only a job that syncs the configured
+  // account regardless puts the stray payment on record for the merchant.
+  await ctx.driver.safetyNet();
+  const recorded = await ctx.driver.recordedHashes(page.destinationAccount, page.paymentIdentifier);
+  ctx.expect(recorded.includes(paid.hash), `the payment is on record after the safety net (${recorded.length} transaction(s) on the tag)`);
+  ctx.expect((await platformState(ctx, order)).paid === false, 'the order stays as the merchant left it');
 };
 
 RUNNERS['PS-02'] = async (ctx) => {

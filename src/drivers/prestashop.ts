@@ -103,6 +103,11 @@ export class PrestaShopDriver implements Driver {
     return r.value === null ? 0 : Number.parseInt(r.value, 10);
   }
 
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+    const answer = (await this.helper('transactions', { account: destinationAccount, tag: paymentIdentifier })) as { hashes?: string[] };
+    return answer.hashes ?? [];
+  }
+
   /** Platform-specific evidence for the report. */
   async orderState(order: PlacedOrder): Promise<Record<string, unknown>> {
     return (await this.helper('order-state', { order: order.id })) as Record<string, unknown>;

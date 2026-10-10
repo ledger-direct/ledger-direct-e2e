@@ -284,6 +284,13 @@ echo json_encode([
     return { count: Number.parseInt(count ?? '0', 10) || 0, last: rest.join('\n') || undefined };
   }
 
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+    const answer = (await this.php(`${BOOTSTRAP}
+$transactions = $om->get(\\Hardcastle\\LedgerDirect\\Port\\MagentoXrplTransactionRepository::class)->findTransactions($argv[1], (int) $argv[2]);
+echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier)) as { hashes?: string[] };
+    return answer.hashes ?? [];
+  }
+
   /** Runs a PHP script inside the shop container; the script prints one JSON line. */
   private async php(script: string, ...args: string[]): Promise<unknown> {
     const stdout = await this.exec(['php', '--', ...args], script);

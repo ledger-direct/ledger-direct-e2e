@@ -234,6 +234,13 @@ echo json_encode(['id' => $id]), "\\n";`, sku)) as { id: number };
     return (this.testProductId = String(r.id));
   }
 
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+    const answer = (await this.wp(`<?php
+$transactions = \\Hardcastle\\LedgerDirect\\Service\\ServiceFactory::getInstance()->getSyncService()->findTransactions($args[0], (int) $args[1]);
+echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier)) as { hashes?: string[] };
+    return answer.hashes ?? [];
+  }
+
   /** Runs a PHP script inside WordPress through WP-CLI in the running container; the script prints one JSON line. */
   private async wp(script: string, ...args: string[]): Promise<unknown> {
     const argv = [
