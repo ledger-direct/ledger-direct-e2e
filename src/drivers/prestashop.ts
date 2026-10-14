@@ -105,7 +105,9 @@ export class PrestaShopDriver implements Driver {
 
   async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
     const answer = (await this.helper('transactions', { account: destinationAccount, tag: paymentIdentifier })) as { hashes?: string[] };
-    return answer.hashes ?? [];
+    // A helper without the command answers with its command list; that is not "nothing on record".
+    if (!Array.isArray(answer.hashes)) throw new Error('the shop helper does not know "transactions" (module older than PrestaShop #31?)');
+    return answer.hashes;
   }
 
   /** Platform-specific evidence for the report. */
