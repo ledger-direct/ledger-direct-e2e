@@ -9,7 +9,8 @@ import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { balances as xrplBalances } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
-import { createDriver, TARGETS } from './drivers/factory.js';
+import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
+import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount } from './runner/defaults.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
@@ -171,9 +172,10 @@ program
   .option('--container <name>', 'Shopware: docker container for the scheduled task (LD_E2E_SHOPWARE_CONTAINER)')
   .option('--cases <ids>', 'comma-separated case IDs, "automated", or "all"', 'automated')
   .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging)')
+  .option('--keep-account', "leave the run's receiving account configured; by default the shop goes back to its own (LD_E2E_<TARGET>_SHOP_ACCOUNT or the wallet file's LEDGERDIRECT_TESTNET_<TARGET>_SHOP_ADDRESS)", false)
   .option('--timeout <seconds>', 'per-case wait for a state', '240')
   .option('--report <file>', 'JSON report path', 'out/report.json')
-  .action(async (opts: { target: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string; cases: string; receivingAccount?: string; timeout: string; report: string }) => {
+  .action(async (opts: { target: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string; cases: string; receivingAccount?: string; keepAccount: boolean; timeout: string; report: string }) => {
     const { driver, baseUrl } = createDriver(opts.target, {
       baseUrl: opts.baseUrl,
       composeDir: opts.composeDir,
@@ -187,6 +189,7 @@ program
       baseUrl,
       caseIds: resolveCaseIds(opts.cases),
       receivingAccount: opts.receivingAccount,
+      keepAccount: opts.keepAccount,
       timeoutMs: Number.parseInt(opts.timeout, 10) * 1000,
       version: program.version() ?? '0.0.0',
       log: (line) => process.stderr.write(redact(line) + '\n'),
@@ -195,6 +198,37 @@ program
     const failed = report.results.filter((r) => r.outcome === 'fail').length;
     out(report, () => markdown(report) + `\nreport: ${opts.report}`);
     if (failed > 0) process.exitCode = 1;
+  });
+
+const shop = program.command('shop').description("the dev shop's LedgerDirect configuration");
+shop
+  .command('reset')
+  .description("put the shop back on its own receiving account (testnet, every asset on, 300 s quote) after a run or a manual test left something else there")
+  .requiredOption('--target <plugin>', TARGETS.join(' | '))
+  .option('--account <address>', 'the account to set; default LD_E2E_<TARGET>_SHOP_ACCOUNT, else LEDGERDIRECT_TESTNET_<TARGET>_SHOP_ADDRESS')
+  .option('--quote-expiry <seconds>', 'quote validity to set', String(DEFAULT_QUOTE_EXPIRY_SECONDS))
+  .option('--base-url <url>', 'how the shop is reached from here (LD_E2E_<TARGET>_BASE_URL)')
+  .option('--compose-dir <dir>', "PrestaShop, WooCommerce, Magento: the shop's compose folder (LD_E2E_<TARGET>_COMPOSE_DIR)")
+  .option('--compose-files <files>', 'WooCommerce: comma-separated compose files (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
+  .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
+  .option('--container <name>', 'Shopware: docker container (LD_E2E_SHOPWARE_CONTAINER)')
+  .action(async (opts: { target: string; account?: string; quoteExpiry: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
+    if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
+    const account = opts.account ?? defaultShopAccount(opts.target);
+    if (!account) {
+      throw new Error(`no shop account known for ${opts.target}: pass --account, or set LD_E2E_${opts.target.toUpperCase()}_SHOP_ACCOUNT or LEDGERDIRECT_TESTNET_${opts.target.toUpperCase()}_SHOP_ADDRESS`);
+    }
+    const { driver } = createDriver(opts.target, {
+      baseUrl: opts.baseUrl,
+      composeDir: opts.composeDir,
+      composeFiles: opts.composeFiles?.split(',').map((f) => f.trim()).filter(Boolean),
+      accessKey: opts.accessKey,
+      container: opts.container,
+    });
+    const ledger = ledgerFor(chain());
+    const config = { destinationAccount: account, network: 'testnet' as const, assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: Number.parseInt(opts.quoteExpiry, 10) };
+    await driver.configure(config);
+    out({ target: opts.target, ...config }, () => `${opts.target}: receiving account ${account}, ${config.assets.join('/')} on, quote ${config.quoteExpirySeconds} s`);
   });
 
 const reportCmd = program.command('report').description('turn a report into evidence where it belongs');

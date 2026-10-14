@@ -6,6 +6,7 @@ import type { Driver, ShopConfig } from '../drivers/driver.js';
 import type { CaseResult, Report } from '../report/report.js';
 import { RUNNERS } from './cases.js';
 import { CaseContext } from './context.js';
+import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount } from './defaults.js';
 
 export interface RunOptions {
   driver: Driver;
@@ -14,6 +15,12 @@ export interface RunOptions {
   caseIds: string[];
   /** Reuse this receiving account instead of creating a fresh one (manual debugging only). */
   receivingAccount?: string;
+  /**
+   * Leave the run's throwaway account configured in the shop afterwards. By default the
+   * shop is put back on its own account (defaultShopAccount) when one is known, so a dev
+   * shop is ready for a manual test the moment the run ends.
+   */
+  keepAccount?: boolean;
   timeoutMs: number;
   version: string;
   log: (line: string) => void;
@@ -33,8 +40,9 @@ export async function runCases(options: RunOptions): Promise<Report> {
       receivingAccount = fresh.address;
       options.log(`receiving account for this run (${ledger.chain}): ${receivingAccount}`);
     }
-    const shop: ShopConfig = { destinationAccount: receivingAccount, network: 'testnet', assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: 300 };
+    const shop: ShopConfig = { destinationAccount: receivingAccount, network: 'testnet', assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: DEFAULT_QUOTE_EXPIRY_SECONDS };
     await options.driver.configure(shop);
+    const restoreTo = options.keepAccount ? undefined : defaultShopAccount(options.driver.name);
 
     const results: CaseResult[] = [];
     for (const id of options.caseIds) {
@@ -56,6 +64,11 @@ export async function runCases(options: RunOptions): Promise<Report> {
         results.push({ id, title: spec.title, target: options.driver.name, outcome: 'fail', reason, startedAt: new Date(caseStart).toISOString(), durationMs: Date.now() - caseStart, states: ctx.states, evidence: ctx.evidence });
         options.log(`  ${id}: FAIL ${reason}`);
       }
+    }
+
+    if (restoreTo && restoreTo !== receivingAccount) {
+      await options.driver.configure({ ...shop, destinationAccount: restoreTo });
+      options.log(`receiving account restored to the shop's own: ${restoreTo}`);
     }
 
     return { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results };
