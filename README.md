@@ -168,6 +168,23 @@ ld-e2e --chain STELLAR pay --to G... --id 123 --amount 1.5                    # 
 On Stellar, issued assets (USDC, EURC) are not listed until the core's Stellar registry ships;
 `wallet status` shows XLM only, and a test asset can be issued for the wrong-asset case.
 
+## The shop's own account
+
+A run configures a fresh throwaway account as the shop's receiving account; nothing else is
+safe, two runs must never share an identifier space. It used to leave that account there, so the
+next manual test paid into an account nobody watched. Now the run puts the shop back on its own
+account when it knows one — `LEDGERDIRECT_TESTNET_<TARGET>_SHOP_ADDRESS` in the wallet file, or
+`LD_E2E_<TARGET>_SHOP_ACCOUNT` — and says so; `--keep-account` leaves the throwaway in place for
+debugging. The same by hand, after a manual test changed something:
+
+```
+ld-e2e shop reset --target woocommerce            # the shop's own account, testnet, every asset on, 300 s quote
+ld-e2e shop reset --target shopware --account r…  # a specific account
+```
+
+In CI neither variable is set and the run leaves the shop as it is; the container is gone a
+minute later.
+
 ## Secrets
 
 Seeds come from the environment and from nowhere else. The program knows no file: locally you
