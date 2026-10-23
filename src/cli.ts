@@ -196,7 +196,8 @@ program
     });
     await writeReport(report, opts.report);
     const failed = report.results.filter((r) => r.outcome === 'fail').length;
-    out(report, () => markdown(report) + `\nreport: ${opts.report}`);
+    const spent = Object.entries(report.spending?.spent ?? {}).map(([code, amount]) => `${amount} ${code}`).join(', ') || 'nothing';
+    out(report, () => markdown(report) + `\nspent: ${spent}\nreport: ${opts.report}`);
     if (failed > 0) process.exitCode = 1;
   });
 

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { CASES, findCase } from './cases/catalogue.js';
 import { CHAINS, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
 import type { ChainId, Ledger } from './chains/chain.js';
+import { spendGuard } from './chains/spend.js';
 import { redact, requireSeed } from './config.js';
 import type { Driver, PlacedOrder } from './drivers/driver.js';
 import { createDriver, TARGETS } from './drivers/factory.js';
@@ -22,9 +23,10 @@ import { resolveCaseIds, runCases } from './runner/run.js';
  *   is a separate decision, to follow once the canary token exists.
  * - No seed ever leaves the process. A fresh account's seed stays in
  *   memory; tools return addresses, hashes and states.
- * - A payment above LD_E2E_MAX_PAYMENT (in the asset's units) is refused,
- *   not questioned: the agent reads the amount off the page, the server
- *   caps what it will sign.
+ * - A payment above LD_E2E_MAX_PAYMENT (in the asset's units), or beyond
+ *   LD_E2E_RUN_BUDGET for this server start, is refused, not questioned: the
+ *   agent reads the amount off the page, the spend guard (chains/spend.ts)
+ *   caps what the server will sign — the same guard as for the CLI.
  * - Every payment answers with the hash and an explorer link, so the agent
  *   can show evidence instead of claiming success.
  */
@@ -33,7 +35,7 @@ export function createServer(): McpServer {
   const orders = new Map<string, { order: PlacedOrder; target: string; asset: string }>();
   const freshSeeds = new Map<string, string>();
   const jobs = new Map<string, { status: 'running' | 'done' | 'failed'; startedAt: string; log: string[]; result?: unknown; error?: string }>();
-  const maxPayment = Number.parseFloat(process.env.LD_E2E_MAX_PAYMENT ?? '50');
+  const maxPayment = spendGuard().maxPayment;
 
   const targetSchema = z.enum(TARGETS).describe('the shop under test');
   const chainSchema = z.enum(['XRPL', 'STELLAR']).default('XRPL').describe('the chain; XRPL by default');
@@ -93,7 +95,7 @@ export function createServer(): McpServer {
 
   server.registerTool('shop_pay_order', {
     title: 'Pay an order',
-    description: `Reads the amount, account and identifier off the order's payment page and pays exactly that from the chain treasury (testnet). Refuses amounts above ${maxPayment}. Returns the transaction hash and explorer link.`,
+    description: `Reads the amount, account and identifier off the order's payment page and pays exactly that from the chain treasury (testnet). Refuses amounts above ${maxPayment} and payments beyond LD_E2E_RUN_BUDGET. Returns the transaction hash and explorer link.`,
     inputSchema: {
       orderId: z.string(),
       asset: z.enum(['XRP', 'RLUSD', 'USDC']).optional().describe('send another asset than quoted to provoke the wrong-asset case'),
@@ -102,7 +104,6 @@ export function createServer(): McpServer {
   }, async ({ orderId, asset, chain }) => {
     const { order, target } = knownOrder(orderId);
     const page = await driver(target).paymentPage(order);
-    if (Number.parseFloat(page.amountDisplayed) > maxPayment) throw new Error(`refusing to pay ${page.amountDisplayed} ${page.asset}: above LD_E2E_MAX_PAYMENT (${maxPayment})`);
     const result = await withLedger(chain, (ledger) => ledger.pay({
       seed: requireSeed(treasurySeedVariable(ledger.chain)),
       to: page.destinationAccount,
@@ -161,11 +162,11 @@ export function createServer(): McpServer {
 
   server.registerTool('wallet_status', {
     title: 'Wallet status',
-    description: 'Native and token balances of the chain treasury, or of any address.',
+    description: 'Native and token balances of the chain treasury, or of any address, and what this server has paid since it started (against LD_E2E_RUN_BUDGET).',
     inputSchema: { chain: chainSchema, address: z.string().optional() },
   }, async ({ chain, address }) => withLedger(chain, async (ledger) => {
     const target = address ?? ledger.addressOf(requireSeed(treasurySeedVariable(ledger.chain)));
-    return text(await ledger.balances(target));
+    return text({ ...(await ledger.balances(target)), spending: spendGuard().summary() });
   }));
 
   server.registerTool('wallet_fresh', {
@@ -186,7 +187,7 @@ export function createServer(): McpServer {
 
   server.registerTool('pay', {
     title: 'Send a payment',
-    description: `One payment from the chain treasury: exact amount, receiving account, identifier (destination tag or memo id), asset. For the catalogue's deliberate wrong payments; shop_pay_order is the safe path. Refuses amounts above ${maxPayment}.`,
+    description: `One payment from the chain treasury: exact amount, receiving account, identifier (destination tag or memo id), asset. For the catalogue's deliberate wrong payments; shop_pay_order is the safe path. Refuses amounts above ${maxPayment} and payments beyond LD_E2E_RUN_BUDGET.`,
     inputSchema: {
       chain: chainSchema,
       to: z.string(),
@@ -195,7 +196,6 @@ export function createServer(): McpServer {
       asset: z.string().optional().describe('the chain\'s native asset when absent'),
     },
   }, async ({ chain, to, amount, identifier, asset }) => {
-    if (Number.parseFloat(amount) > maxPayment) throw new Error(`refusing to pay ${amount}: above LD_E2E_MAX_PAYMENT (${maxPayment})`);
     return withLedger(chain, async (ledger) => {
       const result = await ledger.pay({ seed: requireSeed(treasurySeedVariable(ledger.chain)), to, identifier, amount, asset: asset ?? ledger.nativeAsset });
       if (!result.validated) throw new Error(`payment failed on the ledger: ${result.result} (tx ${result.hash}, ${result.explorer})`);
@@ -236,7 +236,7 @@ export function createServer(): McpServer {
       log: (line) => job.log.push(redact(line)),
     }).then(async (result) => {
       await writeReport(result, report);
-      job.result = { report, checklist: markdown(result) };
+      job.result = { report, checklist: markdown(result), spending: result.spending };
       job.status = 'done';
     }).catch((error: unknown) => {
       job.error = redact(error instanceof Error ? error.message : String(error));

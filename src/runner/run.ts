@@ -1,6 +1,7 @@
 import { CASES, findCase } from '../cases/catalogue.js';
 import type { Ledger } from '../chains/chain.js';
 import { treasurySeedVariable } from '../chains/index.js';
+import { spendGuard } from '../chains/spend.js';
 import { requireSeed } from '../config.js';
 import type { Driver, ShopConfig } from '../drivers/driver.js';
 import type { CaseResult, Report } from '../report/report.js';
@@ -71,7 +72,7 @@ export async function runCases(options: RunOptions): Promise<Report> {
       options.log(`receiving account restored to the shop's own: ${restoreTo}`);
     }
 
-    return { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results };
+    return { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results, spending: spendGuard().summary() };
   } finally {
     await ledger.close();
   }

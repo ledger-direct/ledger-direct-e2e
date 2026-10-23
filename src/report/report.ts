@@ -24,6 +24,8 @@ export interface Report {
   network: 'testnet';
   startedAt: string;
   results: CaseResult[];
+  /** What the process had paid when the run ended, per asset, and its limits (chains/spend.ts). */
+  spending?: { spent: Record<string, string>; maxPayment: string; budget?: Record<string, string> };
 }
 
 export async function writeReport(report: Report, path: string): Promise<void> {

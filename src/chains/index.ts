@@ -1,4 +1,5 @@
 import type { ChainId, Ledger } from './chain.js';
+import { GuardedLedger, spendGuard } from './spend.js';
 import { StellarLedger } from './stellar/ledger.js';
 import { XrplLedger } from './xrpl/ledger.js';
 
@@ -8,7 +9,12 @@ export function isChain(value: string): value is ChainId {
   return (CHAINS as readonly string[]).includes(value.toUpperCase());
 }
 
+/** Every ledger the harness hands out pays through the process's spend guard (spend.ts). */
 export function ledgerFor(chain: string): Ledger {
+  return new GuardedLedger(unguardedLedger(chain), spendGuard());
+}
+
+function unguardedLedger(chain: string): Ledger {
   switch (chain.toUpperCase()) {
     case 'XRPL':
       return new XrplLedger();
