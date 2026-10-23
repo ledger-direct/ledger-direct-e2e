@@ -178,6 +178,9 @@ const RULES: Rule[] = [
   })),
 ];
 
+/** Every rule's id and level, in the order the rules run — for a UI that explains them. */
+export const DEVIATION_RULES: ReadonlyArray<{ id: DeviationId; level: DeviationLevel; grace: boolean }> = RULES.map(({ id, level, grace }) => ({ id, level, grace }));
+
 /** The deviations in force at the latest observation; empty when the sides agree. */
 export function deviations(history: Observation[], quote: WatchQuote, options: DeviationOptions = {}): Deviation[] {
   if (history.length === 0) return [];

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { IncomingPayment } from '../src/chains/chain.js';
 import type { PaymentPageView, StatusPayload } from '../src/drivers/driver.js';
 import type { PlatformState } from '../src/drivers/platform.js';
-import { deviations, verdict, type WatchQuote } from '../src/watch/deviations.js';
+import { DEVIATION_RULES, deviations, verdict, type WatchQuote } from '../src/watch/deviations.js';
 import type { Observation } from '../src/watch/observe.js';
 
 const USDC: WatchQuote = { asset: 'USDC', issuer: 'rUSDC', native: false };
@@ -116,5 +116,11 @@ describe('deviations', () => {
       at(40, { status: status('waiting'), ledgerError: 'x' }),
     ];
     expect(deviations(h, USDC)[0].since).toBe('2026-10-23T10:00:10.000Z');
+  });
+
+  it('lists its rules for a UI, each id once', () => {
+    expect(DEVIATION_RULES).toHaveLength(13);
+    expect(new Set(DEVIATION_RULES.map((r) => r.id)).size).toBe(13);
+    expect(DEVIATION_RULES.filter((r) => !r.grace).map((r) => r.id)).toEqual(['page-amount-differs', 'page-not-testnet']);
   });
 });
