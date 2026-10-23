@@ -121,7 +121,7 @@ export class ShopwareDriver implements Driver {
     const html = await response.text();
     const page = readPaymentPage(html);
     if (!page) throw new Error(`Shopware: payment page for order ${order.id} did not render the markup contract`);
-    return { ...page, asset: page.asset ?? this.secretOf.get(order.id)?.asset ?? 'XRP', statusUrl: this.statusUrl(order) };
+    return { ...page, asset: page.asset ?? this.secretOf.get(order.id)?.asset ?? 'XRP', statusUrl: this.statusUrl(order), pageUrl: this.pageUrl(order) };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {

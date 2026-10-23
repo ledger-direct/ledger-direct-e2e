@@ -55,7 +55,7 @@ export class PrestaShopDriver implements Driver {
     const html = await (await fetch(url, { redirect: 'manual' })).text();
     const page = readPaymentPage(html);
     if (!page) throw new Error(`PrestaShop: payment page for order ${order.id} did not render the markup contract`);
-    return { ...page, asset: page.asset ?? 'XRP', statusUrl: page.pollUrl ?? `${this.options.baseUrl}/module/ledgerdirect/poll?id_order=${order.id}&key=${order.secret}` };
+    return { ...page, asset: page.asset ?? 'XRP', statusUrl: page.pollUrl ?? `${this.options.baseUrl}/module/ledgerdirect/poll?id_order=${order.id}&key=${order.secret}`, pageUrl: url };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {

@@ -38,7 +38,16 @@ describe('readPaymentPage', () => {
       destinationAccount: 'rMW6jyfsGyB5kPoYWVV4z1h9DA5KmEGPYq',
       paymentIdentifier: '795186163',
       pollUrl: '/status?state=waiting&then=settled',
+      network: 'testnet',
     });
+  });
+
+  it('reads the QR request and the quoted issuer when the page renders them', () => {
+    const uri = 'https://xrplf.org//send?to=rsRbTicxbBsS83JqmAizH9vggETCGA627f&amp;dt=4264383458&amp;amount=1.01&amp;currency=524C555344000000000000000000000000000000&amp;issuer=rQhWct2fv4Vc4KRjRgMrxa8xPN9Zx9iLKV';
+    const page = readPaymentPage(shopware140.replace('data-ld-asset="RLUSD"', `data-ld-asset="RLUSD" data-ld-payment-uri="${uri}"`));
+    expect(page?.paymentUri).toBe(uri.replace(/&amp;/g, '&'));
+    expect(page?.issuer).toBe('rQhWct2fv4Vc4KRjRgMrxa8xPN9Zx9iLKV');
+    expect(readPaymentPage(contract)?.paymentUri).toBeUndefined();
   });
 
   it('falls back to [data-ld-amount] when the root has no data-ld-amount-requested, never to a platform id', () => {

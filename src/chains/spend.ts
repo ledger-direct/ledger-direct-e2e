@@ -1,4 +1,4 @@
-import type { Balances, ChainAsset, ChainId, FreshAccount, Ledger, PaymentRequest, PaymentResult } from './chain.js';
+import type { Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult } from './chain.js';
 
 /**
  * The one place every payment passes before it is signed — `ld-e2e pay`, the
@@ -136,6 +136,11 @@ export class GuardedLedger implements Ledger {
   async pay(request: PaymentRequest): Promise<PaymentResult> {
     this.guard.charge(request.asset, request.amount);
     return this.inner.pay(request);
+  }
+
+  /** Reading costs nothing; only pay() passes the guard. */
+  incoming(address: string, options?: { identifier?: string; limit?: number }): Promise<IncomingPayment[]> {
+    return this.inner.incoming(address, options);
   }
 
   explorerUrl(hash: string): string {

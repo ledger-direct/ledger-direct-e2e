@@ -4,7 +4,8 @@ import type { State } from '../cases/catalogue.js';
  * Reads a payment page through the markup contract of `@ledger-direct/payment-ui`
  * (its `src/README.md`): `data-ld-state`, `data-ld-amount-requested` and
  * `data-ld-asset` on the root, `[data-ld-account]` and `[data-ld-tag]` by their
- * `data-value`, `data-ld-poll-url` for the status endpoint. No driver parses
+ * `data-value`, `data-ld-poll-url` for the status endpoint; `data-ld-payment-uri`,
+ * `data-ld-network` and `data-ld-issuer` when present (the lab shows them). No driver parses
  * platform ids or labels; a platform that renders the contract is readable.
  * Since 2026-09-28 all four plugins do (Shopware 1.4.2, PrestaShop 0.5.0,
  * Magento 1.1.0, WooCommerce 1.3.0); the reader for their earlier pages is gone.
@@ -19,6 +20,12 @@ export interface PaymentPageFields {
   paymentIdentifier: string;
   /** `data-ld-poll-url`, entity-decoded; absent when the page does not poll. */
   pollUrl?: string;
+  /** `data-ld-payment-uri`: what the page's QR code encodes, built by the shop's server. */
+  paymentUri?: string;
+  /** `data-ld-network`: `testnet` or `mainnet`, as the page states it. */
+  network?: string;
+  /** `data-ld-issuer`: tokens only, the issuer the quote names. */
+  issuer?: string;
 }
 
 const STATES: readonly State[] = ['waiting', 'partial', 'wrong_asset', 'settled', 'expired'];
@@ -34,14 +41,19 @@ function readContractPage(html: string, state: State): PaymentPageFields | undef
   const account = valueOf(element(html, 'data-ld-account'));
   const tag = valueOf(element(html, 'data-ld-tag'));
   if (!amount || !account || !tag || !/^\d+$/.test(tag)) return undefined;
-  const pollUrl = attr(html, 'data-ld-poll-url');
+  const optional = {
+    pollUrl: attr(html, 'data-ld-poll-url'),
+    paymentUri: attr(html, 'data-ld-payment-uri'),
+    network: attr(html, 'data-ld-network'),
+    issuer: attr(html, 'data-ld-issuer'),
+  };
   return {
     state,
     amountDisplayed: amount,
     asset: attr(html, 'data-ld-asset') || undefined,
     destinationAccount: account,
     paymentIdentifier: tag,
-    ...(pollUrl ? { pollUrl } : {}),
+    ...Object.fromEntries(Object.entries(optional).filter(([, v]) => v)),
   };
 }
 

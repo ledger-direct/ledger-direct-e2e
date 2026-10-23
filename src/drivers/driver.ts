@@ -46,6 +46,14 @@ export interface PaymentPageView {
   /** Destination tag (XRPL) or memo id (Stellar) as shown, as a decimal string. */
   paymentIdentifier: string;
   statusUrl: string;
+  /** The page itself, secret included — for a person who wants to look at it. */
+  pageUrl?: string;
+  /** What the page's QR code encodes (`data-ld-payment-uri`), when the page renders one. */
+  paymentUri?: string;
+  /** `testnet` or `mainnet`, as the page states it. */
+  network?: string;
+  /** Tokens only: the issuer the quote names. */
+  issuer?: string;
 }
 
 export interface StatusPayload {
