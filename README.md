@@ -138,7 +138,12 @@ claude mcp add ledger-direct-e2e -- /path/to/ledger-direct-e2e/scripts/ld-e2e-mc
 Give the server the shops it may talk to through the environment (in the same file):
 `LD_E2E_<TARGET>_BASE_URL` and `LD_E2E_<TARGET>_COMPOSE_DIR` for PrestaShop, WooCommerce and
 Magento, `LD_E2E_SHOPWARE_ACCESS_KEY` for Shopware (`.env.example` lists them all), and optionally
-`LD_E2E_MAX_PAYMENT` (default 50).
+the spending limits below.
+
+**Which door when.** In a session with a shell (Claude Code), prefer the CLI with `--json`: the
+state lives in the file system — order numbers, hashes, `out/report.json` — and a long run needs no
+job to poll. The MCP server is for clients without a shell (Desktop, Cowork) and for the shopping
+agent. Both call the same functions.
 
 | Group | Tools |
 |---|---|
@@ -149,8 +154,25 @@ Magento, `LD_E2E_SHOPWARE_ACCESS_KEY` for Shopware (`.env.example` lists them al
 "Order two mugs on the PrestaShop dev shop and pay in RLUSD" is four tool calls: search, place,
 pay, wait — and the answer carries the transaction hash, the explorer link and what the shop
 recorded. The rules every tool keeps: testnet only; no seed ever leaves the server; a payment above
-`LD_E2E_MAX_PAYMENT` is refused, not questioned; a payment the ledger rejected is an error, never a
-success with a hash.
+`LD_E2E_MAX_PAYMENT` or beyond `LD_E2E_RUN_BUDGET` is refused, not questioned; a payment the ledger
+rejected is an error, never a success with a hash. `wallet_status` shows what the server has paid
+since it started.
+
+## Spending limits
+
+Every payment passes one guard before it is signed — `ld-e2e pay`, the catalogue (so the nightly)
+and the MCP tools alike (`src/chains/spend.ts`, wrapped around every ledger `ledgerFor()` hands out):
+
+- `LD_E2E_MAX_PAYMENT` (default 50) caps a single payment, in the asset's units.
+- `LD_E2E_RUN_BUDGET`, e.g. `XRP=15,RLUSD=5,USDC=5`, caps the sum per process and asset — per run for
+  the CLI, per server start for MCP. Unset, there is no budget. Once set, an asset it does not name
+  gets nothing.
+
+A payment counts when it is about to be signed, the catalogue's deliberate wrong ones included.
+Crossing a limit is an error: the case fails, the wallet keeps its funds. The report carries what
+the run spent (`spending`), the CLI prints it after the checklist. A full XRPL run with the 1-euro
+test article spends roughly 5 XRP, 2 RLUSD and 1 USDC. DEX purchases (`wallet top-up`) are not
+payments and have their own `--max-xrp`.
 
 ## Wallets
 
