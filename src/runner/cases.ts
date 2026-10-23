@@ -1,3 +1,5 @@
+import { halfOf } from '../amounts.js';
+import { readPlatformState } from '../drivers/platform.js';
 import { CaseContext, sleep } from './context.js';
 import type { StatusPayload } from '../drivers/driver.js';
 
@@ -88,24 +90,11 @@ function sameRefusal(a: string, b: string): boolean {
   return strip(a) === strip(b);
 }
 
-function halfOf(amount: string): string {
-  const [int, frac = ''] = amount.split('.');
-  const scale = frac.length;
-  const units = BigInt(int + frac);
-  const half = units / 2n;
-  const s = half.toString().padStart(scale + 1, '0');
-  return scale === 0 ? s : `${s.slice(0, -scale)}.${s.slice(-scale)}`;
-}
-
 async function platformState(ctx: CaseContext, order: { id: string; reference: string; secret: string }): Promise<{ paid: boolean; incomplete: boolean; payments: number; hashMatches: boolean }> {
-  const driver = ctx.driver as unknown as { orderState?: (o: typeof order) => Promise<Record<string, unknown>> };
-  if (!driver.orderState) return { paid: true, incomplete: false, payments: 1, hashMatches: true };
-  const s = await driver.orderState(order);
-  const state = s.state as { is_paid?: boolean; is_incomplete?: boolean; name?: string };
-  const payments = (s.payments as Array<{ transaction_id: string }>) ?? [];
-  const intent = s.intent as { hash?: string } | null;
-  ctx.evidence.push({ kind: 'state', text: `order state "${state.name}", ${payments.length} payment record(s), total_paid_real ${String(s.total_paid_real)}` });
-  return { paid: state.is_paid === true, incomplete: state.is_incomplete === true, payments: payments.length, hashMatches: payments.length > 0 && payments[0].transaction_id === intent?.hash };
+  const s = await readPlatformState(ctx.driver, order);
+  if (!s) return { paid: true, incomplete: false, payments: 1, hashMatches: true };
+  ctx.evidence.push({ kind: 'state', text: `order state "${s.name}", ${s.payments.length} payment record(s), total_paid_real ${String(s.raw.total_paid_real)}` });
+  return { paid: s.paid, incomplete: s.incomplete, payments: s.payments.length, hashMatches: s.payments.length > 0 && s.payments[0] === s.intentHash };
 }
 
 export function statusValue(s: StatusPayload, key: 'amount_paid' | 'shortfall'): string | null {
