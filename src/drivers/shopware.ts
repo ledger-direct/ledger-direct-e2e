@@ -14,7 +14,11 @@ export interface ShopwareOptions {
   adminPassword?: string;
   /** Docker container name for the one thing that has no HTTP face: running the scheduled task. */
   container?: string;
-  /** Product number of the cheap test article the driver creates on first use. */
+  /**
+   * Product number of the cheap test article the driver creates on first use (LD-E2E-001). Set to
+   * an article the shop already sells — a demo shop's own — and the driver buys that one instead
+   * and creates nothing.
+   */
   testProductNumber?: string;
 }
 
@@ -261,6 +265,8 @@ export class ShopwareDriver implements Driver {
     const number = this.options.testProductNumber ?? 'LD-E2E-001';
     const existing = (await this.admin('POST', '/api/search/product', { filter: [{ type: 'equals', field: 'productNumber', value: number }] })) as { data: Array<{ id: string }> };
     if (existing.data[0]) return (this.testProductId = existing.data[0].id);
+    // An article the shop is supposed to have is not invented under its number.
+    if (this.options.testProductNumber) throw new Error(`Shopware: no product ${number} (LD_E2E_SHOPWARE_TEST_PRODUCT) in this shop`);
 
     const [tax, currency, salesChannel] = await Promise.all([
       this.admin('POST', '/api/search/tax', { filter: [{ type: 'equals', field: 'taxRate', value: 19 }] }) as Promise<{ data: Array<{ id: string }> }>,
