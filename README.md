@@ -57,7 +57,10 @@ ld-e2e run --target magento --base-url https://localhost:8444 \
 ```
 
 Every `--base-url` and `--compose-dir` has an environment fallback, `LD_E2E_<TARGET>_BASE_URL` and
-`LD_E2E_<TARGET>_COMPOSE_DIR`, so a run is usually just `--target` and `--cases`.
+`LD_E2E_<TARGET>_COMPOSE_DIR`, so a run is usually just `--target` and `--cases`. Without a compose folder
+the current one is used; the PrestaShop driver checks it before its first command and names the variable,
+and says to `docker compose up -d` when the stack is stopped. Started from anywhere else — the lab, an MCP
+client — set the variable.
 
 Every command takes `--chain XRPL|STELLAR`; without it, XRPL. Each chain has its own treasury
 wallet, and a run creates a fresh receiving account on that chain (two runs must never share an
