@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { assertComposeDir, explainComposeError } from './compose.js';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { readPaymentPage } from './page.js';
 
@@ -23,6 +24,7 @@ export class PrestaShopDriver implements Driver {
   readonly name = 'prestashop' as const;
 
   private cronUrl?: string;
+  private composeChecked = false;
 
   constructor(private readonly options: PrestaShopOptions) {}
 
@@ -55,7 +57,7 @@ export class PrestaShopDriver implements Driver {
     const html = await (await fetch(url, { redirect: 'manual' })).text();
     const page = readPaymentPage(html);
     if (!page) throw new Error(`PrestaShop: payment page for order ${order.id} did not render the markup contract`);
-    return { ...page, asset: page.asset ?? 'XRP', statusUrl: page.pollUrl ?? `${this.options.baseUrl}/module/ledgerdirect/poll?id_order=${order.id}&key=${order.secret}` };
+    return { ...page, asset: page.asset ?? 'XRP', statusUrl: page.pollUrl ?? `${this.options.baseUrl}/module/ledgerdirect/poll?id_order=${order.id}&key=${order.secret}`, pageUrl: url };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {
@@ -116,8 +118,14 @@ export class PrestaShopDriver implements Driver {
   }
 
   private async helper(command: string, args: Record<string, string>): Promise<unknown> {
+    if (!this.composeChecked) {
+      assertComposeDir('prestashop', this.options.composeDir);
+      this.composeChecked = true;
+    }
     const argv = ['compose', 'exec', '-T', '-u', 'www-data', this.options.service ?? 'prestashop', 'php', '/var/www/html/modules/ledgerdirect/dev/bin/e2e.php', command, ...Object.entries(args).map(([k, v]) => `--${k}=${v}`)];
-    const { stdout } = await run('docker', argv, { cwd: this.options.composeDir, maxBuffer: 4 * 1024 * 1024 });
+    const { stdout } = await run('docker', argv, { cwd: this.options.composeDir, maxBuffer: 4 * 1024 * 1024 }).catch((e: unknown) => {
+      throw explainComposeError('prestashop', this.options.composeDir, e);
+    });
     const json = stdout.slice(stdout.indexOf('{'));
     return JSON.parse(json) as unknown;
   }

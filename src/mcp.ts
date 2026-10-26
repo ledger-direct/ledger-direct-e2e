@@ -7,11 +7,12 @@ import { CHAINS, isChain, ledgerFor, treasurySeedVariable } from './chains/index
 import type { ChainId, Ledger } from './chains/chain.js';
 import { spendGuard } from './chains/spend.js';
 import { redact, requireSeed } from './config.js';
-import type { Driver, PlacedOrder } from './drivers/driver.js';
-import { createDriver, TARGETS } from './drivers/factory.js';
+import { TARGETS } from './drivers/factory.js';
+import { hasPlatformState } from './drivers/platform.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
+import { ShopSession } from './session.js';
 
 /**
  * The MCP server: the same functions as the CLI, as tools for a coding
@@ -30,9 +31,10 @@ import { resolveCaseIds, runCases } from './runner/run.js';
  * - Every payment answers with the hash and an explorer link, so the agent
  *   can show evidence instead of claiming success.
  */
-export function createServer(): McpServer {
+export function createServer(options: { session?: ShopSession } = {}): McpServer {
   const server = new McpServer({ name: 'ledger-direct-e2e', version: '0.1.0' });
-  const orders = new Map<string, { order: PlacedOrder; target: string; asset: string }>();
+  // Orders, drivers and paying what a page shows live in the session — the same kernel the lab uses.
+  const session = options.session ?? new ShopSession();
   const freshSeeds = new Map<string, string>();
   const jobs = new Map<string, { status: 'running' | 'done' | 'failed'; startedAt: string; log: string[]; result?: unknown; error?: string }>();
   const maxPayment = spendGuard().maxPayment;
@@ -44,15 +46,6 @@ export function createServer(): McpServer {
     return { content: [{ type: 'text', text: redact(typeof data === 'string' ? data : JSON.stringify(data, null, 2)) }] };
   }
 
-  // Drivers keep per-order secrets in memory (Shopware's deepLinkCode and return URL); one instance per target.
-  const drivers = new Map<string, { driver: Driver; baseUrl: string }>();
-  const shop = (target: string): { driver: Driver; baseUrl: string } => {
-    let d = drivers.get(target);
-    if (!d) drivers.set(target, (d = createDriver(target)));
-    return d;
-  };
-  const driver = (target: string): Driver => shop(target).driver;
-
   async function withLedger<T>(chain: ChainId, fn: (ledger: Ledger) => Promise<T>): Promise<T> {
     const ledger = ledgerFor(chain);
     try {
@@ -62,10 +55,12 @@ export function createServer(): McpServer {
     }
   }
 
-  const knownOrder = (orderId: string): { order: PlacedOrder; target: string; asset: string } => {
-    const entry = orders.get(orderId);
-    if (!entry) throw new Error(`order ${orderId} was not placed in this session; place it with shop_place_order first`);
-    return entry;
+  const knownOrder = (orderId: string) => {
+    try {
+      return session.get(orderId);
+    } catch {
+      throw new Error(`order ${orderId} was not placed in this session; place it with shop_place_order first`);
+    }
   };
 
   // --- shopping and paying ------------------------------------------------
@@ -74,7 +69,7 @@ export function createServer(): McpServer {
     title: 'Search products',
     description: 'Products matching a free-text query in the shop, as a customer would search. Returns id, number, name and gross price; pick one for shop_place_order.',
     inputSchema: { target: targetSchema, query: z.string().min(1) },
-  }, async ({ target, query }) => text(await driver(target).findProducts(query)));
+  }, async ({ target, query }) => text(await session.findProducts(target, query)));
 
   server.registerTool('shop_place_order', {
     title: 'Place an order',
@@ -86,11 +81,8 @@ export function createServer(): McpServer {
       quantity: z.number().int().min(1).max(100).default(1),
     },
   }, async ({ target, asset, productId, quantity }) => {
-    const d = driver(target);
-    const order = await d.placeOrder(asset, { productId, quantity });
-    const page = await d.paymentPage(order);
-    orders.set(order.id, { order, target, asset });
-    return text({ orderId: order.id, reference: order.reference, paymentPage: page });
+    const { entry, page } = await session.placeOrder(target, asset, { productId, quantity });
+    return text({ orderId: entry.key, reference: entry.order.reference, paymentPage: page });
   });
 
   server.registerTool('shop_pay_order', {
@@ -102,17 +94,10 @@ export function createServer(): McpServer {
       chain: chainSchema,
     },
   }, async ({ orderId, asset, chain }) => {
-    const { order, target } = knownOrder(orderId);
-    const page = await driver(target).paymentPage(order);
-    const result = await withLedger(chain, (ledger) => ledger.pay({
-      seed: requireSeed(treasurySeedVariable(ledger.chain)),
-      to: page.destinationAccount,
-      identifier: page.paymentIdentifier,
-      amount: page.amountDisplayed,
-      asset: asset ?? page.asset,
-    }));
+    knownOrder(orderId);
+    const { paid, to, identifier, asset: _sent, ...result } = await session.payOrder(orderId, { asset, chain });
     if (!result.validated) throw new Error(`payment failed on the ledger: ${result.result} (tx ${result.hash}, ${result.explorer}). Check the treasury balance with wallet_status.`);
-    return text({ paid: `${page.amountDisplayed} ${asset ?? page.asset}`, to: page.destinationAccount, identifier: page.paymentIdentifier, ...result });
+    return text({ paid, to, identifier, ...result });
   });
 
   server.registerTool('shop_order_status', {
@@ -120,8 +105,8 @@ export function createServer(): McpServer {
     description: 'The payment-status payload of the shop for an order placed in this session: state, amounts, seconds left, redirect once closed.',
     inputSchema: { orderId: z.string() },
   }, async ({ orderId }) => {
-    const { order, target } = knownOrder(orderId);
-    return text(await driver(target).status(order));
+    knownOrder(orderId);
+    return text(await session.status(orderId));
   });
 
   server.registerTool('shop_wait_for', {
@@ -133,11 +118,11 @@ export function createServer(): McpServer {
       timeoutSeconds: z.number().int().min(8).max(50).default(50),
     },
   }, async ({ orderId, state, timeoutSeconds }) => {
-    const { order, target } = knownOrder(orderId);
+    knownOrder(orderId);
     const deadline = Date.now() + timeoutSeconds * 1000;
     const seen: string[] = [];
     while (Date.now() < deadline) {
-      const status = await driver(target).status(order);
+      const status = await session.status(orderId);
       if (seen[seen.length - 1] !== status.state) seen.push(status.state);
       if (status.state === state || (state === 'redirect' && status.redirect !== undefined) || status.redirect !== undefined) {
         return text({ reached: status.state, redirect: status.redirect ?? null, seen, status });
@@ -152,10 +137,9 @@ export function createServer(): McpServer {
     description: 'What the platform recorded for an order: state name, payment records, stored payment intent (hash, amount paid).',
     inputSchema: { orderId: z.string() },
   }, async ({ orderId }) => {
-    const { order, target } = knownOrder(orderId);
-    const d = driver(target) as Driver & { orderState?: (o: PlacedOrder) => Promise<Record<string, unknown>> };
-    if (!d.orderState) return text({ note: `${target} exposes no platform state` });
-    return text(await d.orderState(order));
+    const { target } = knownOrder(orderId);
+    if (!hasPlatformState(session.driver(target))) return text({ note: `${target} exposes no platform state` });
+    return text((await session.platformState(orderId))?.raw);
   });
 
   // --- wallets ------------------------------------------------------------
@@ -227,9 +211,9 @@ export function createServer(): McpServer {
     const job: { status: 'running' | 'done' | 'failed'; startedAt: string; log: string[]; result?: unknown; error?: string } = { status: 'running', startedAt: new Date().toISOString(), log: [] };
     jobs.set(jobId, job);
     void runCases({
-      driver: driver(target),
+      driver: session.driver(target),
       ledger: ledgerFor(chain),
-      baseUrl: shop(target).baseUrl,
+      baseUrl: session.shop(target).baseUrl,
       caseIds: ids,
       timeoutMs: 240_000,
       version: '0.1.0',

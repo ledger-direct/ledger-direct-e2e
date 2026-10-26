@@ -46,6 +46,32 @@ export interface PaymentResult {
   from: string;
 }
 
+/**
+ * A payment that arrived at an account, as the ledger recorded it — what a merchant
+ * would see in an explorer. The lab's ledger column and the deviation rules read it.
+ */
+export interface IncomingPayment {
+  hash: string;
+  /** As the harness names the asset (XRP, RLUSD, USDC, XLM, EURC …); the decoded code when it does not know it. */
+  asset: string;
+  /** Issued assets only. */
+  issuer?: string;
+  /** What arrived, as a decimal string in the asset's units: the delivered amount, not the sent maximum. */
+  amount: string;
+  /** Destination tag (XRPL), memo or muxed id (Stellar), as a decimal string or the memo text. */
+  identifier?: string;
+  /** How the identifier travelled: `tag` (XRPL), `memo_id`, `memo_text` or `muxed` (Stellar). */
+  identifierKind?: 'tag' | 'memo_id' | 'memo_text' | 'muxed';
+  from: string;
+  /** Chain result code (tesSUCCESS, tecPATH_PARTIAL, success, failed …). */
+  result: string;
+  /** True only for a successful payment in a closed ledger. */
+  validated: boolean;
+  /** When the ledger closed it, ISO 8601. */
+  at?: string;
+  explorer: string;
+}
+
 export interface FreshAccount {
   address: string;
   seed: string;
@@ -63,6 +89,8 @@ export interface Ledger {
   fund(address: string): Promise<{ address: string; amount: string }>;
   balances(address: string): Promise<Balances>;
   pay(request: PaymentRequest): Promise<PaymentResult>;
+  /** Payments that arrived at `address`, newest first; with `identifier`, only those carrying it. */
+  incoming(address: string, options?: { identifier?: string; limit?: number }): Promise<IncomingPayment[]>;
   explorerUrl(hash: string): string;
   /** Returns the seed's public address without touching the network. */
   addressOf(seed: string): string;

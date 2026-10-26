@@ -57,7 +57,10 @@ ld-e2e run --target magento --base-url https://localhost:8444 \
 ```
 
 Every `--base-url` and `--compose-dir` has an environment fallback, `LD_E2E_<TARGET>_BASE_URL` and
-`LD_E2E_<TARGET>_COMPOSE_DIR`, so a run is usually just `--target` and `--cases`.
+`LD_E2E_<TARGET>_COMPOSE_DIR`, so a run is usually just `--target` and `--cases`. Without a compose folder
+the current one is used; the PrestaShop driver checks it before its first command and names the variable,
+and says to `docker compose up -d` when the stack is stopped. Started from anywhere else — the lab, an MCP
+client — set the variable.
 
 Every command takes `--chain XRPL|STELLAR`; without it, XRPL. Each chain has its own treasury
 wallet, and a run creates a fresh receiving account on that chain (two runs must never share an
@@ -157,6 +160,40 @@ recorded. The rules every tool keeps: testnet only; no seed ever leaves the serv
 `LD_E2E_MAX_PAYMENT` or beyond `LD_E2E_RUN_BUDGET` is refused, not questioned; a payment the ledger
 rejected is an error, never a success with a hash. `wallet_status` shows what the server has paid
 since it started.
+
+## As a library: the session and the deviation rules
+
+The third door, for a person: [`ledger-direct-lab`](https://github.com/ledger-direct/ledger-direct-lab)
+shows an order as three windows side by side — what the customer sees, what the shop recorded, what
+the ledger holds — and a demo stage. It has no logic of its own; it imports this package
+(`src/index.ts` is the public entry):
+
+- `ShopSession` (`src/session.ts`) is the kernel of the MCP shop tools: one driver per target, the
+  orders of this process, `payOrder()` for the displayed amount, half of it, the shortfall or another
+  asset — always from the chain treasury, always through the spend guard.
+- `Ledger.incoming(address, { identifier })` lists what arrived on the chain: the delivered amount
+  (not the sent maximum), the issuer, the tag or memo and how it travelled (tag, memo id, text memo,
+  muxed id).
+- `observe()` (`src/watch/observe.ts`) reads the three sides at one moment; a side that cannot be
+  read is recorded, never hides the other two. `deviations()` compares a series of observations:
+
+| Rule | Level | Holds when |
+|---|---|---|
+| `ledger-paid-page-waiting` | alarm | the ledger has a payment in the quoted asset, the status endpoint still says `waiting`/`expired` |
+| `ledger-foreign-not-shown` | alarm | a token from another issuer arrived on a token quote, the endpoint does not say `wrong_asset` |
+| `status-settled-shop-open`, `shop-paid-status-open` | alarm | endpoint and shop disagree on whether the order is paid |
+| `page-amount-differs` | alarm, at once | the page asks for another amount than the quote (the 0.83-for-0.83211 bug) |
+| `page-not-testnet` | alarm, at once | the page names another network |
+| `page-status-differ` | warning | page and endpoint show different states |
+| `amount-paid-differs` | warning | what the endpoint counts is not what arrived |
+| `tx-not-recorded` | warning | a validated transaction the shop has not stored |
+| `settled-no-redirect` | warning | settled, but the page gets nowhere to go |
+| `customer-unreachable`, `shop-unreachable`, `ledger-unreachable` | warning | a side cannot be read |
+
+Every rule but the two marked "at once" has to hold for a grace period (20 s by default: the sync is
+throttled to 5 s, a page polls every 8 s). The payment page's QR request (`data-ld-payment-uri`),
+its network and the quoted issuer are now part of what `readPaymentPage()` returns, and every driver
+adds the page URL — the lab shows the shop's own QR code instead of building one.
 
 ## Spending limits
 

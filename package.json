@@ -1,9 +1,18 @@
 {
   "name": "ledger-direct-e2e",
   "version": "0.1.0",
-  "description": "End-to-end harness for the LedgerDirect plugins: XRPL testnet wallets, payments, and the PS-01…PS-11 case catalogue, as a CLI and (later) an MCP server",
+  "description": "End-to-end harness for the LedgerDirect plugins: XRPL and Stellar testnet wallets, payments, and the PS-01…PS-11 case catalogue, as a CLI, an MCP server and a library",
   "license": "MIT",
   "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "ld-e2e": "dist/cli.js"
   },

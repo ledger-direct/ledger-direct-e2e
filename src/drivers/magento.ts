@@ -128,7 +128,7 @@ echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.ass
     const html = await response.text();
     const page = readPaymentPage(html);
     if (!page) throw new Error(`Magento: payment page for order ${order.id} did not render the markup contract`);
-    return { ...page, asset: page.asset ?? this.assetOf.get(order.id) ?? 'XRP', statusUrl: this.statusUrl(order) };
+    return { ...page, asset: page.asset ?? this.assetOf.get(order.id) ?? 'XRP', statusUrl: this.statusUrl(order), pageUrl: this.pageUrl(order) };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {

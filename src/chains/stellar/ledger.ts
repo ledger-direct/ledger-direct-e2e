@@ -1,5 +1,6 @@
 import { Asset, BASE_FEE, Horizon, Keypair, Memo, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
-import type { Balances, ChainAsset, FreshAccount, Ledger, PaymentRequest, PaymentResult } from '../chain.js';
+import type { Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult } from '../chain.js';
+import { parseStellarIncoming } from './incoming.js';
 import { NATIVE, TESTNET_EXPLORER_TX, TESTNET_FRIENDBOT, TESTNET_HORIZON, TESTNET_ISSUED } from './assets.js';
 
 /**
@@ -112,6 +113,12 @@ export class StellarLedger implements Ledger {
 
   registerAsset(code: string, issuer: string): void {
     this.issued.set(code, { code, issuer });
+  }
+
+  async incoming(address: string, options: { identifier?: string; limit?: number } = {}): Promise<IncomingPayment[]> {
+    const page = await this.horizon.payments().forAccount(address).order('desc').limit(options.limit ?? 50).join('transactions').call();
+    const payments = parseStellarIncoming(page.records as unknown[], address, TESTNET_EXPLORER_TX);
+    return options.identifier === undefined ? payments : payments.filter((p) => p.identifier === options.identifier);
   }
 
   explorerUrl(hash: string): string {

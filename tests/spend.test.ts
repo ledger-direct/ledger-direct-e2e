@@ -22,6 +22,7 @@ vi.mock('../src/chains/xrpl/ledger.js', () => ({
       signed.push(request);
       return { hash: `H${signed.length}`, result: 'tesSUCCESS', validated: true, delivered: request.amount, explorer: 'https://example.invalid', from: 'rTreasury' };
     }
+    async incoming() { return []; }
     explorerUrl(hash: string) { return hash; }
     addressOf() { return 'rTreasury'; }
     async close() {}

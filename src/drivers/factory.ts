@@ -44,7 +44,10 @@ export function createDriver(target: string, overrides: DriverOverrides = {}): {
       const accessKey = overrides.accessKey ?? env('ACCESS_KEY');
       if (!accessKey) throw new Error('Shopware needs --access-key (or LD_E2E_SHOPWARE_ACCESS_KEY): the sales channel access key');
       return {
-        driver: new ShopwareDriver({ baseUrl, accessKey, container: overrides.container ?? env('CONTAINER'), adminUser: env('ADMIN_USER'), adminPassword: env('ADMIN_PASSWORD') }),
+        driver: new ShopwareDriver({
+          baseUrl, accessKey, container: overrides.container ?? env('CONTAINER'), adminUser: env('ADMIN_USER'), adminPassword: env('ADMIN_PASSWORD'),
+          testProductNumber: env('TEST_PRODUCT'),
+        }),
         baseUrl,
       };
     }
