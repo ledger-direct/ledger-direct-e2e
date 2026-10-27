@@ -19,8 +19,9 @@ export class XrplLedger implements Ledger {
    */
   async connect(): Promise<Client> {
     if (this.client && !this.client.isConnected()) {
-      await this.client.disconnect().catch(() => undefined);
+      const stale = this.client;
       this.client = undefined;
+      await retireClient(stale);
     }
     if (!this.client) {
       this.client = new Client(TESTNET_WS);
@@ -84,4 +85,27 @@ export class XrplLedger implements Ledger {
       this.client = undefined;
     }
   }
+}
+
+/**
+ * Lets go of a client whose socket died, for good.
+ *
+ * A socket that is already CLOSING is not closed again by disconnect(), which
+ * only clears the timers and waits for the close. When that close comes with a
+ * code other than xrpl.js's intentional 4000, the connection schedules a
+ * reconnect — after the timers were cleared — and the discarded client would
+ * come back with a socket and a heartbeat nobody closes. Every such reconnect
+ * announces itself with 'reconnecting' just before its timer is set; a
+ * disconnect() on the next turn cancels it.
+ *
+ * The wait for the close is bounded: ws gives up on a closing socket after 30 s
+ * by itself, longer than a run should stand still. A close that comes later is
+ * still caught by the listener.
+ */
+export async function retireClient(stale: Client, waitMs = 5000): Promise<void> {
+  stale.connection.on('reconnecting', () => setImmediate(() => void stale.disconnect().catch(() => undefined)));
+  let timer: NodeJS.Timeout | undefined;
+  const bounded = new Promise<void>((resolve) => (timer = setTimeout(resolve, waitMs)));
+  await Promise.race([stale.disconnect().catch(() => undefined), bounded]);
+  clearTimeout(timer);
 }
