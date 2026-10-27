@@ -1,25 +1,22 @@
 import { Keypair } from '@stellar/stellar-sdk';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { Wallet } from 'xrpl';
 import type { Ledger } from '../src/chains/chain.js';
 import { isAccountOf } from '../src/chains/index.js';
 import type { Driver, ShopConfig } from '../src/drivers/driver.js';
 import { defaultShopAccount, shopAccountVariables } from '../src/runner/defaults.js';
 import { runCases } from '../src/runner/run.js';
+import { isolateEnv } from './env.js';
 
 // Fresh random addresses only — never anything derived from a real seed.
 const xrplAddress = () => Wallet.generate().classicAddress;
 const stellarAddress = () => Keypair.random().publicKey();
 
-const VARS = [
+isolateEnv([
   'LD_E2E_SHOPWARE_SHOP_ACCOUNT', 'LEDGERDIRECT_TESTNET_SHOPWARE_SHOP_ADDRESS',
   'LD_E2E_SHOPWARE_STELLAR_SHOP_ACCOUNT', 'LEDGERDIRECT_TESTNET_SHOPWARE_STELLAR_SHOP_ADDRESS',
   'LEDGERDIRECT_TESTNET_STELLAR_TREASURY_SEED',
-];
-
-afterEach(() => {
-  for (const v of VARS) delete process.env[v];
-});
+]);
 
 describe('the shop account per chain', () => {
   it('names the variables of the chain, without an infix for XRPL', () => {
