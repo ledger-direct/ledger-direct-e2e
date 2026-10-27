@@ -215,7 +215,7 @@ shop
   .option('--container <name>', 'Shopware: docker container (LD_E2E_SHOPWARE_CONTAINER)')
   .action(async (opts: { target: string; account?: string; quoteExpiry: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
     if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
-    const account = opts.account ?? defaultShopAccount(opts.target);
+    const account = opts.account ?? defaultShopAccount(opts.target, chain());
     if (!account) {
       throw new Error(`no shop account known for ${opts.target}: pass --account, or set LD_E2E_${opts.target.toUpperCase()}_SHOP_ACCOUNT or LEDGERDIRECT_TESTNET_${opts.target.toUpperCase()}_SHOP_ADDRESS`);
     }

@@ -43,7 +43,7 @@ export async function runCases(options: RunOptions): Promise<Report> {
     }
     const shop: ShopConfig = { chain: ledger.chain, destinationAccount: receivingAccount, network: 'testnet', assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: DEFAULT_QUOTE_EXPIRY_SECONDS };
     await options.driver.configure(shop);
-    const restoreTo = options.keepAccount ? undefined : defaultShopAccount(options.driver.name);
+    const restoreTo = options.keepAccount ? undefined : defaultShopAccount(options.driver.name, ledger.chain);
 
     const results: CaseResult[] = [];
     for (const id of options.caseIds) {
@@ -67,12 +67,21 @@ export async function runCases(options: RunOptions): Promise<Report> {
       }
     }
 
+    const report: Report = { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results, spending: spendGuard().summary() };
+
+    // The evidence is complete at this point; putting the shop back is housekeeping and
+    // must not lose it. A refused restore (the plugin validates the account it is given)
+    // is reported, and the run's throwaway account stays configured.
     if (restoreTo && restoreTo !== receivingAccount) {
-      await options.driver.configure({ ...shop, destinationAccount: restoreTo });
-      options.log(`receiving account restored to the shop's own: ${restoreTo}`);
+      try {
+        await options.driver.configure({ ...shop, destinationAccount: restoreTo });
+        options.log(`receiving account restored to the shop's own: ${restoreTo}`);
+      } catch (error) {
+        options.log(`receiving account NOT restored to ${restoreTo}: ${error instanceof Error ? error.message : String(error)}; the run's account ${receivingAccount} stays configured`);
+      }
     }
 
-    return { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results, spending: spendGuard().summary() };
+    return report;
   } finally {
     await ledger.close();
   }
