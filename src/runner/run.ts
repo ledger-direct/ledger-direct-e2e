@@ -1,13 +1,13 @@
 import { CASES, findCase } from '../cases/catalogue.js';
 import type { Ledger } from '../chains/chain.js';
-import { treasurySeedVariable } from '../chains/index.js';
+import { isAccountOf, treasurySeedVariable } from '../chains/index.js';
 import { spendGuard } from '../chains/spend.js';
 import { requireSeed } from '../config.js';
 import type { Driver, ShopConfig } from '../drivers/driver.js';
 import type { CaseResult, Report } from '../report/report.js';
 import { RUNNERS } from './cases.js';
 import { CaseContext } from './context.js';
-import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount } from './defaults.js';
+import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount, shopAccountVariables } from './defaults.js';
 
 export interface RunOptions {
   driver: Driver;
@@ -70,14 +70,19 @@ export async function runCases(options: RunOptions): Promise<Report> {
     const report: Report = { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results, spending: spendGuard().summary() };
 
     // The evidence is complete at this point; putting the shop back is housekeeping and
-    // must not lose it. A refused restore (the plugin validates the account it is given)
-    // is reported, and the run's throwaway account stays configured.
+    // must not lose it. An account of the wrong form is not written at all; a refused or
+    // half-done restore (the account may already be written when a later step fails) is
+    // reported without claiming which account the shop ended up with.
     if (restoreTo && restoreTo !== receivingAccount) {
-      try {
-        await options.driver.configure({ ...shop, destinationAccount: restoreTo });
-        options.log(`receiving account restored to the shop's own: ${restoreTo}`);
-      } catch (error) {
-        options.log(`receiving account NOT restored to ${restoreTo}: ${error instanceof Error ? error.message : String(error)}; the run's account ${receivingAccount} stays configured`);
+      if (!isAccountOf(ledger.chain, restoreTo)) {
+        options.log(`receiving account NOT restored: ${restoreTo} is not a ${ledger.chain} account (check ${shopAccountVariables(options.driver.name, ledger.chain).join(' / ')}); the run's account ${receivingAccount} stays configured`);
+      } else {
+        try {
+          await options.driver.configure({ ...shop, destinationAccount: restoreTo });
+          options.log(`receiving account restored to the shop's own: ${restoreTo}`);
+        } catch (error) {
+          options.log(`receiving account restore to ${restoreTo} failed: ${error instanceof Error ? error.message : String(error)}; the shop may be on either account now — check it, or run \`ld-e2e shop reset --target ${options.driver.name}${ledger.chain === 'XRPL' ? '' : ` --chain ${ledger.chain}`}\``);
+        }
       }
     }
 
