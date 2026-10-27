@@ -41,7 +41,7 @@ export async function runCases(options: RunOptions): Promise<Report> {
       receivingAccount = fresh.address;
       options.log(`receiving account for this run (${ledger.chain}): ${receivingAccount}`);
     }
-    const shop: ShopConfig = { destinationAccount: receivingAccount, network: 'testnet', assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: DEFAULT_QUOTE_EXPIRY_SECONDS };
+    const shop: ShopConfig = { chain: ledger.chain, destinationAccount: receivingAccount, network: 'testnet', assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: DEFAULT_QUOTE_EXPIRY_SECONDS };
     await options.driver.configure(shop);
     const restoreTo = options.keepAccount ? undefined : defaultShopAccount(options.driver.name);
 

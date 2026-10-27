@@ -9,6 +9,8 @@ import type { State } from '../cases/catalogue.js';
  * factory.ts builds them. See Handover-E2E-Teststrategie.md §3 for the mapping.
  */
 export interface ShopConfig {
+  /** The chain the receiving account is on: 'XRPL' | 'STELLAR'. A driver with one chain's keys ignores it. */
+  chain: string;
   destinationAccount: string;
   network: 'testnet';
   assets: string[];

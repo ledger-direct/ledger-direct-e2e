@@ -227,7 +227,7 @@ shop
       container: opts.container,
     });
     const ledger = ledgerFor(chain());
-    const config = { destinationAccount: account, network: 'testnet' as const, assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: Number.parseInt(opts.quoteExpiry, 10) };
+    const config = { chain: ledger.chain, destinationAccount: account, network: 'testnet' as const, assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: Number.parseInt(opts.quoteExpiry, 10) };
     await driver.configure(config);
     out({ target: opts.target, ...config }, () => `${opts.target}: receiving account ${account}, ${config.assets.join('/')} on, quote ${config.quoteExpirySeconds} s`);
   });
