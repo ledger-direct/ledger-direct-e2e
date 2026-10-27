@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
@@ -22,11 +23,26 @@ export interface ShopwareOptions {
   testProductNumber?: string;
 }
 
-const PAYMENT_METHOD_IDS: Record<string, string> = {
+/**
+ * The plugin's payment method ids: the three XRPL methods keep the ids of the
+ * first release, every later method derives its id from the intent type
+ * (`md5('stellar-usdc-payment')`) — PaymentMethodInstaller::paymentMethodIdFor().
+ */
+const LEGACY_PAYMENT_METHOD_IDS: Record<string, string> = {
   XRP: '7ca60321a9d2dac0fe3622a5110f55bb',
   RLUSD: '7ca60321a9d2dac0fe3622a5110f55bd',
   USDC: '7ca60321a9d2dac0fe3622a5110f55be',
 };
+
+function methodIdFor(chain: string, asset: string): string {
+  if (chain === 'XRPL' && LEGACY_PAYMENT_METHOD_IDS[asset]) return LEGACY_PAYMENT_METHOD_IDS[asset];
+  return createHash('md5').update(`${chain.toLowerCase()}-${asset.toLowerCase()}-payment`).digest('hex');
+}
+
+/** The issued assets a chain's configuration card has a toggle for (`xrplIsRlusdEnabled`, `stellarIsUsdcEnabled`, …). */
+const TOGGLED_ASSETS: Record<string, string[]> = { XRPL: ['RLUSD', 'USDC'], STELLAR: ['USDC', 'EURC'] };
+
+const capitalise = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
 
 const CONFIG_PREFIX = 'LedgerDirect.config.';
 const SCHEDULED_TASK = 'ledger_direct.settle_open_transactions';
@@ -42,6 +58,8 @@ export class ShopwareDriver implements Driver {
   readonly name = 'shopware' as const;
 
   private adminToken?: string;
+  /** The chain configure() last pointed the shop at; XRPL until then. */
+  private chain = 'XRPL';
   private readonly secretOf = new Map<string, { deepLinkCode: string; returnUrl: string; asset: string }>();
   private storefrontUrl?: string;
   private domain?: { url: string; salesChannelId: string };
@@ -49,30 +67,40 @@ export class ShopwareDriver implements Driver {
 
   constructor(private readonly options: ShopwareOptions) {}
 
+  /**
+   * One configuration card per chain in the plugin (1.6.0), its keys named after
+   * the chain: `xrplEnabled`, `useXrplTestnet`, `xrplTestnetDestinationAccount`,
+   * `xrplIsRlusdEnabled` — and the same shape with `stellar`. The quote validity
+   * is global under its old key.
+   */
   async configure(config: ShopConfig): Promise<void> {
-    await this.admin('POST', '/api/_action/system-config/batch', {
-      null: {
-        [CONFIG_PREFIX + 'useXrplTestnet']: true,
-        [CONFIG_PREFIX + 'xrplTestnetDestinationAccount']: config.destinationAccount,
-        [CONFIG_PREFIX + 'xrplIsRlusdEnabled']: config.assets.includes('RLUSD'),
-        [CONFIG_PREFIX + 'xrplIsUsdcEnabled']: config.assets.includes('USDC'),
-        [CONFIG_PREFIX + 'xrplQuoteExpiry']: config.quoteExpirySeconds,
-      },
-    });
-    await this.enablePaymentMethods();
+    const chain = (config.chain || 'XRPL').toUpperCase();
+    const prefix = chain.toLowerCase();
+    this.chain = chain;
+    const values: Record<string, unknown> = {
+      [CONFIG_PREFIX + `${prefix}Enabled`]: true,
+      [CONFIG_PREFIX + `use${capitalise(chain)}Testnet`]: true,
+      [CONFIG_PREFIX + `${prefix}TestnetDestinationAccount`]: config.destinationAccount,
+      [CONFIG_PREFIX + 'xrplQuoteExpiry']: config.quoteExpirySeconds,
+    };
+    for (const asset of TOGGLED_ASSETS[chain] ?? []) {
+      values[CONFIG_PREFIX + `${prefix}Is${capitalise(asset)}Enabled`] = config.assets.includes(asset);
+    }
+    await this.admin('POST', '/api/_action/system-config/batch', { null: values });
+    await this.enablePaymentMethods(chain, config.assets);
     await this.ensureTestProduct();
   }
 
   /**
-   * A fresh shop has the plugin's three payment methods inactive and assigned to no
+   * A fresh shop has the plugin's payment methods inactive and assigned to no
    * sales channel — plugin:install creates them, the merchant switches them on. The
    * harness does what the merchant would, for the sales channel of its base URL, so
    * a throwaway shop (the nightly run) is ready without a hand in the admin.
    */
-  private async enablePaymentMethods(): Promise<void> {
+  private async enablePaymentMethods(chain: string, assets: string[]): Promise<void> {
     const salesChannelId = await this.salesChannelId();
-    for (const id of Object.values(PAYMENT_METHOD_IDS)) {
-      await this.admin('PATCH', `/api/payment-method/${id}`, { active: true, salesChannels: [{ id: salesChannelId }] });
+    for (const asset of assets) {
+      await this.admin('PATCH', `/api/payment-method/${methodIdFor(chain, asset)}`, { active: true, salesChannels: [{ id: salesChannelId }] });
     }
   }
 
@@ -83,8 +111,7 @@ export class ShopwareDriver implements Driver {
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const paymentMethodId = PAYMENT_METHOD_IDS[asset];
-    if (!paymentMethodId) throw new Error(`Shopware: no payment method for ${asset}`);
+    const paymentMethodId = methodIdFor(this.chain, asset);
     const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     const storefrontUrl = await this.salesChannelUrl();
 
@@ -167,13 +194,21 @@ export class ShopwareDriver implements Driver {
     return { ran: SCHEDULED_TASK, output: (stdout + stderr).trim().split('\n').slice(-3) };
   }
 
-  /** The plugin's transaction table, read in the dockware container (root/root is dockware's default). */
+  /**
+   * The plugin's table of synced payments, read in the dockware container (root/root is
+   * dockware's default): the XRPL transaction table by destination tag, the Stellar payment
+   * table by memo id — the account's format says which chain it is on.
+   */
   async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
-    if (!/^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(destinationAccount) || !/^\d+$/.test(paymentIdentifier)) {
-      throw new Error('Shopware: recordedHashes() takes an XRPL address and a numeric destination tag');
+    const xrpl = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(destinationAccount);
+    const stellar = /^G[A-Z2-7]{55}$/.test(destinationAccount);
+    if (!(xrpl || stellar) || !/^\d+$/.test(paymentIdentifier)) {
+      throw new Error('Shopware: recordedHashes() takes an XRPL or Stellar receiving account and a numeric identifier');
     }
     const container = this.options.container ?? 'shopware6_672-shopware-1';
-    const sql = `SELECT hash FROM ledger_direct_xrpl_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
+    const sql = xrpl
+      ? `SELECT hash FROM ledger_direct_xrpl_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`
+      : `SELECT DISTINCT hash FROM ledger_direct_stellar_payment WHERE destination = '${destinationAccount}' AND memo_id = ${paymentIdentifier}`;
     const { stdout } = await run('docker', ['exec', container, 'bash', '-lc', `mysql -h 127.0.0.1 -u root -proot shopware -N -e "${sql}" 2>/dev/null`]);
     return stdout.split('\n').map((l) => l.trim()).filter((l) => l !== '');
   }

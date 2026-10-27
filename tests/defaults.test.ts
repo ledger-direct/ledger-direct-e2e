@@ -1,12 +1,9 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { defaultShopAccount } from '../src/runner/defaults.js';
-
-const VARS = ['LD_E2E_WOOCOMMERCE_SHOP_ACCOUNT', 'LEDGERDIRECT_TESTNET_WOOCOMMERCE_SHOP_ADDRESS', 'LEDGERDIRECT_TESTNET_MAGENTO_SHOP_ADDRESS'];
+import { isolateEnv } from './env.js';
 
 describe('defaultShopAccount', () => {
-  afterEach(() => {
-    for (const v of VARS) delete process.env[v];
-  });
+  isolateEnv(['LD_E2E_WOOCOMMERCE_SHOP_ACCOUNT', 'LEDGERDIRECT_TESTNET_WOOCOMMERCE_SHOP_ADDRESS', 'LD_E2E_MAGENTO_SHOP_ACCOUNT', 'LEDGERDIRECT_TESTNET_MAGENTO_SHOP_ADDRESS']);
 
   it('is undefined when nothing names the shop account, as in CI', () => {
     expect(defaultShopAccount('magento')).toBeUndefined();

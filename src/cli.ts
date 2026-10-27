@@ -3,14 +3,14 @@ import { readFile } from 'node:fs/promises';
 import { Command } from 'commander';
 import { Wallet } from 'xrpl';
 import { CASES, findCase } from './cases/catalogue.js';
-import { CHAINS, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
+import { CHAINS, isAccountOf, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
 import { isAsset } from './chains/xrpl/assets.js';
 import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { balances as xrplBalances } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
-import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount } from './runner/defaults.js';
+import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount, shopAccountVariables } from './runner/defaults.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
@@ -206,7 +206,7 @@ shop
   .command('reset')
   .description("put the shop back on its own receiving account (testnet, every asset on, 300 s quote) after a run or a manual test left something else there")
   .requiredOption('--target <plugin>', TARGETS.join(' | '))
-  .option('--account <address>', 'the account to set; default LD_E2E_<TARGET>_SHOP_ACCOUNT, else LEDGERDIRECT_TESTNET_<TARGET>_SHOP_ADDRESS')
+  .option('--account <address>', 'the account to set; default LD_E2E_<TARGET>[_<CHAIN>]_SHOP_ACCOUNT, else LEDGERDIRECT_TESTNET_<TARGET>[_<CHAIN>]_SHOP_ADDRESS (no chain infix for XRPL)')
   .option('--quote-expiry <seconds>', 'quote validity to set', String(DEFAULT_QUOTE_EXPIRY_SECONDS))
   .option('--base-url <url>', 'how the shop is reached from here (LD_E2E_<TARGET>_BASE_URL)')
   .option('--compose-dir <dir>', "PrestaShop, WooCommerce, Magento: the shop's compose folder (LD_E2E_<TARGET>_COMPOSE_DIR)")
@@ -215,9 +215,13 @@ shop
   .option('--container <name>', 'Shopware: docker container (LD_E2E_SHOPWARE_CONTAINER)')
   .action(async (opts: { target: string; account?: string; quoteExpiry: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
     if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
-    const account = opts.account ?? defaultShopAccount(opts.target);
+    const account = opts.account ?? defaultShopAccount(opts.target, chain());
+    const [harnessVariable, walletVariable] = shopAccountVariables(opts.target, chain());
     if (!account) {
-      throw new Error(`no shop account known for ${opts.target}: pass --account, or set LD_E2E_${opts.target.toUpperCase()}_SHOP_ACCOUNT or LEDGERDIRECT_TESTNET_${opts.target.toUpperCase()}_SHOP_ADDRESS`);
+      throw new Error(`no ${chain()} shop account known for ${opts.target}: pass --account, or set ${harnessVariable} or ${walletVariable}`);
+    }
+    if (!isAccountOf(chain(), account)) {
+      throw new Error(`${account} is not a ${chain()} account${opts.account ? '' : ` (from ${harnessVariable} / ${walletVariable})`}; nothing written`);
     }
     const { driver } = createDriver(opts.target, {
       baseUrl: opts.baseUrl,
@@ -227,7 +231,7 @@ shop
       container: opts.container,
     });
     const ledger = ledgerFor(chain());
-    const config = { destinationAccount: account, network: 'testnet' as const, assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: Number.parseInt(opts.quoteExpiry, 10) };
+    const config = { chain: ledger.chain, destinationAccount: account, network: 'testnet' as const, assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: Number.parseInt(opts.quoteExpiry, 10) };
     await driver.configure(config);
     out({ target: opts.target, ...config }, () => `${opts.target}: receiving account ${account}, ${config.assets.join('/')} on, quote ${config.quoteExpirySeconds} s`);
   });
