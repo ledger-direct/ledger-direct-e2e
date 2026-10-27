@@ -11,7 +11,17 @@ export class XrplLedger implements Ledger {
   readonly nativeAsset = 'XRP';
   private client?: Client;
 
+  /**
+   * The client is reused across a run, but a socket that sat idle through
+   * PS-10's 35-minute wait comes back closed — the first request after it
+   * timed out, and PS-11 then found the socket CLOSING. A client that is
+   * not connected any more is replaced, not reused.
+   */
   async connect(): Promise<Client> {
+    if (this.client && !this.client.isConnected()) {
+      await this.client.disconnect().catch(() => undefined);
+      this.client = undefined;
+    }
     if (!this.client) {
       this.client = new Client(TESTNET_WS);
       await this.client.connect();
