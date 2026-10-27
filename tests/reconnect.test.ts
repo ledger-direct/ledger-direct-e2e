@@ -1,8 +1,15 @@
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Client } from 'xrpl';
-import { retireClient } from '../src/chains/xrpl/ledger.js';
+import { retireClient, XrplLedger } from '../src/chains/xrpl/ledger.js';
+
+// XrplLedger connects to TESTNET_WS; here that is the local stand-in below.
+const target = vi.hoisted(() => ({ url: '' }));
+vi.mock('../src/chains/xrpl/assets.js', async (original) => {
+  const actual = await original<typeof import('../src/chains/xrpl/assets.js')>();
+  return { ...actual, get TESTNET_WS() { return target.url; } };
+});
 
 /**
  * A local rippled stand-in: answers server_info, counts connections, and can
@@ -25,12 +32,21 @@ async function fakeRippled() {
   return {
     url,
     connections: () => sockets.length,
+    open: () => sockets.filter((ws) => ws.readyState === ws.OPEN).length,
+    dropAll: () => sockets.forEach((ws) => ws.terminate()),
     leaveClosing(): () => void {
       const ws = sockets[sockets.length - 1];
       const raw = (ws as unknown as { _socket: import('node:net').Socket })._socket;
       ws.close(1001);
       raw.pause();
       return () => raw.destroy();
+    },
+    /** Stops reading the client's last socket, so a close the client starts stays CLOSING until resumed. */
+    stall(): () => void {
+      const ws = sockets[sockets.length - 1];
+      const raw = (ws as unknown as { _socket: import('node:net').Socket })._socket;
+      raw.pause();
+      return () => raw.resume();
     },
     close: () => new Promise<void>((resolve) => wss.close(() => resolve())),
   };
@@ -84,5 +100,58 @@ describe('retiring a client whose socket is CLOSING', () => {
     await wait(600);
     expect(server.connections()).toBe(1);
     expect(client.isConnected()).toBe(false);
+  });
+
+  it('retireClient() also stops a reconnect xrpl.js is already in the middle of', async () => {
+    server = await fakeRippled();
+    const client = new Client(server.url);
+    clients.push(client);
+    await client.connect();
+    const resume = server.stall();
+
+    // What a failed heartbeat does: reconnect() closes with 4000, waits for the close, then connects the same
+    // client again. The close comes back as 4000, so no 'reconnecting' is announced on this path.
+    const inFlight = client.connection.reconnect().catch(() => undefined);
+    await untilClosing(client);
+    await retireClient(client, 200);
+    resume();
+    await inFlight;
+    await wait(600);
+    expect(client.isConnected()).toBe(false);
+    expect(server.open()).toBe(0);
+  });
+});
+
+describe('XrplLedger.connect()', () => {
+  let server: Awaited<ReturnType<typeof fakeRippled>>;
+
+  afterEach(async () => {
+    await server.close();
+  });
+
+  it('shares a connection that is still being opened instead of aborting it', async () => {
+    server = await fakeRippled();
+    target.url = server.url;
+    const ledger = new XrplLedger();
+    const [a, b] = await Promise.all([ledger.connect(), ledger.connect()]);
+    expect(a).toBe(b);
+    expect(a.isConnected()).toBe(true);
+    expect(server.connections()).toBe(1);
+    await ledger.close();
+  });
+
+  it('replaces a client whose connection went away', async () => {
+    server = await fakeRippled();
+    target.url = server.url;
+    const ledger = new XrplLedger();
+    const first = await ledger.connect();
+    server.dropAll();
+    for (let i = 0; i < 100 && first.isConnected(); i++) await wait(10);
+    const second = await ledger.connect();
+    expect(second).not.toBe(first);
+    expect(second.isConnected()).toBe(true);
+    await wait(600);
+    expect(server.open()).toBe(1);
+    await ledger.close();
   });
 });
