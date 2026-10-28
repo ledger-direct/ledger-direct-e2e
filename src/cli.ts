@@ -152,7 +152,7 @@ program
 const cases = program.command('cases').description('the PS-01…PS-11 catalogue');
 cases
   .command('list')
-  .action(() => out(CASES, () => CASES.map((c) => `${c.id}  ${c.title}${c.nightlyOnly ? '  (nightly only)' : ''}`).join('\n')));
+  .action(() => out(CASES, () => CASES.map((c) => `${c.id}  ${c.title}${c.nightlyOnly ? '  (nightly only)' : ''}${c.targets ? `  (${c.targets.join(', ')} only)` : ''}`).join('\n')));
 cases
   .command('show <id>')
   .action((id: string) => {

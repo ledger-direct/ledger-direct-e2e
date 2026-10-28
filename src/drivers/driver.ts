@@ -69,8 +69,22 @@ export interface StatusPayload {
   redirect?: string;
 }
 
+/**
+ * The platform's API for a front end that is not its storefront — what a
+ * headless shop polls instead of the storefront's routes. Raw answers, status
+ * and body, because PS-12 asserts refusals as much as payloads.
+ */
+export interface HeadlessApi {
+  /** The quote: everything a payment page is built from. */
+  quote(order: PlacedOrder): Promise<{ status: number; body: string }>;
+  /** The payment status, as the storefront's poll would get it, over the API. */
+  status(order: PlacedOrder): Promise<{ status: number; body: string }>;
+}
+
 export interface Driver {
   readonly name: 'prestashop' | 'shopware' | 'woocommerce' | 'magento';
+  /** Present on a platform with a headless API (Shopware's Store API); PS-12 runs there only. */
+  readonly headless?: HeadlessApi;
   configure(config: ShopConfig): Promise<void>;
   /** Products matching a free-text query, the way a customer would search. */
   findProducts(query: string): Promise<Product[]>;

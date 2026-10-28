@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import type { Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
@@ -153,6 +153,25 @@ export class ShopwareDriver implements Driver {
     const page = readPaymentPage(html);
     if (!page) throw new Error(`Shopware: payment page for order ${order.id} did not render the markup contract`);
     return { ...page, asset: page.asset ?? this.secretOf.get(order.id)?.asset ?? 'XRP', statusUrl: this.statusUrl(order), pageUrl: this.pageUrl(order) };
+  }
+
+  /**
+   * The Store API as a headless front end uses it: `quote` and `check` under
+   * the sales channel's access key, the order opened by its deepLinkCode, no
+   * session. Plugin 1.8.0 opened `quote` to guests and gave it `page`.
+   */
+  readonly headless: HeadlessApi = {
+    quote: (order) => this.storeApiRaw(`/store-api/ledger-direct/payment/quote/${order.id}`, order),
+    status: (order) => this.storeApiRaw(`/store-api/ledger-direct/payment/check/${order.id}`, order),
+  };
+
+  private async storeApiRaw(path: string, order: PlacedOrder): Promise<{ status: number; body: string }> {
+    const url = new URL(`${this.options.baseUrl}${path}`);
+    url.searchParams.set('deepLinkCode', order.secret);
+    const returnUrl = this.secretOf.get(order.id)?.returnUrl;
+    if (returnUrl) url.searchParams.set('returnUrl', returnUrl);
+    const response = await fetch(url, { headers: { 'sw-access-key': this.options.accessKey, Accept: 'application/json' } });
+    return { status: response.status, body: await response.text() };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {

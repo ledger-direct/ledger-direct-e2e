@@ -1,4 +1,4 @@
-import { CASES, findCase } from '../cases/catalogue.js';
+import { appliesTo, CASES, findCase } from '../cases/catalogue.js';
 import type { Ledger } from '../chains/chain.js';
 import { isAccountOf, treasurySeedVariable } from '../chains/index.js';
 import { spendGuard } from '../chains/spend.js';
@@ -53,6 +53,11 @@ export async function runCases(options: RunOptions): Promise<Report> {
       const ctx = new CaseContext(options.driver, ledger, payerSeed, options.timeoutMs, (line) => options.log(`  ${id}: ${line}`), shop);
       if (!spec || !runner) {
         results.push({ id, title: spec?.title ?? '?', target: options.driver.name, outcome: 'skip', reason: 'not automated yet', startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] });
+        continue;
+      }
+      if (!appliesTo(spec, options.driver.name)) {
+        results.push({ id, title: spec.title, target: options.driver.name, outcome: 'skip', reason: `not a case for ${options.driver.name} (${spec.targets?.join(', ')} only)`, startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] });
+        options.log(`${id} ${spec.title}: skipped, ${spec.targets?.join(', ')} only`);
         continue;
       }
       options.log(`${id} ${spec.title}`);
