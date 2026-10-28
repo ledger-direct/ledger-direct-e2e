@@ -29,8 +29,26 @@ export interface RunOptions {
 
 export async function runCases(options: RunOptions): Promise<Report> {
   const ledger = options.ledger;
-  const payerSeed = requireSeed(treasurySeedVariable(ledger.chain));
   const startedAt = new Date().toISOString();
+
+  /** The skip result for a case that is not this platform's, null for one that is (or an unknown id). */
+  const notApplicable = (id: string): CaseResult | null => {
+    const spec = findCase(id);
+    if (!spec || appliesTo(spec, options.driver.name)) return null;
+    const only = spec.targets?.join(', ') ?? '';
+    return { id, title: spec.title, target: options.driver.name, outcome: 'skip', reason: `not a case for ${options.driver.name} (${only} only)`, startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] };
+  };
+
+  // Nothing of the selection is this platform's: no seed, no account, no configure — the shop
+  // is left exactly as it is, and the report says why each case did not run. An empty
+  // selection still goes through the setup below (a run that only puts the shop back).
+  const skippedAll = options.caseIds.length > 0 ? options.caseIds.map(notApplicable) : [];
+  if (skippedAll.length > 0 && skippedAll.every((r) => r !== null)) {
+    for (const r of skippedAll as CaseResult[]) options.log(`${r.id} ${r.title}: skipped, ${r.reason}`);
+    return { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount: options.receivingAccount ?? '', network: 'testnet', startedAt, results: skippedAll as CaseResult[], spending: spendGuard().summary() };
+  }
+
+  const payerSeed = requireSeed(treasurySeedVariable(ledger.chain));
 
   try {
     let receivingAccount = options.receivingAccount;
@@ -55,9 +73,10 @@ export async function runCases(options: RunOptions): Promise<Report> {
         results.push({ id, title: spec?.title ?? '?', target: options.driver.name, outcome: 'skip', reason: 'not automated yet', startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] });
         continue;
       }
-      if (!appliesTo(spec, options.driver.name)) {
-        results.push({ id, title: spec.title, target: options.driver.name, outcome: 'skip', reason: `not a case for ${options.driver.name} (${spec.targets?.join(', ')} only)`, startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] });
-        options.log(`${id} ${spec.title}: skipped, ${spec.targets?.join(', ')} only`);
+      const skip = notApplicable(id);
+      if (skip) {
+        results.push(skip);
+        options.log(`${id} ${spec.title}: skipped, ${skip.reason}`);
         continue;
       }
       options.log(`${id} ${spec.title}`);

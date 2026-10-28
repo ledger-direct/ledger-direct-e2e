@@ -260,13 +260,16 @@ RUNNERS['PS-12'] = async (ctx) => {
   ctx.expect(view.schema_version === 1 && view.state === 'waiting', 'quote.page has schema_version 1 and state waiting');
   ctx.expect(view.destinationAccount === page.destinationAccount && String(view.destinationTag) === page.paymentIdentifier, 'quote.page names the account and identifier the page shows');
   ctx.expect(view.amountDueDisplay === page.amountDisplayed, `quote.page.amountDueDisplay is the displayed amount (${String(view.amountDueDisplay)} vs ${page.amountDisplayed})`);
-  ctx.expect(page.paymentUri === undefined || view.paymentUri === page.paymentUri, 'quote.page carries the payment request of the QR code');
+  ctx.expect(typeof view.paymentUri === 'string' && view.paymentUri !== '' && (page.paymentUri === undefined || view.paymentUri === page.paymentUri), 'quote.page carries the payment request of the QR code');
   for (const key of ['chain', 'assetLabel', 'network', 'explorerBase', 'secondsLeft', 'quoteSeconds', 'amountRequestedDisplay', 'issuer', 'currencyHex', 'amountDrops', 'xamanApiKey', 'walletConnectProjectId']) {
     ctx.expect(key in view, `quote.page has ${key}`);
   }
 
   const status = await api.status(order);
-  ctx.expect(status.status === 200 && status.body.includes('"schema_version":1') && status.body.includes('"state":"waiting"'), 'status over the Store API answers the contract');
+  ctx.expect(status.status === 200, `status over the Store API answers 200 (got ${status.status})`);
+  const payload = JSON.parse(status.body) as StatusPayload;
+  ctx.expect(payload.schema_version === 1 && payload.state === 'waiting' && payload.base_asset === ctx.ledger.nativeAsset, 'status over the Store API: schema_version 1, waiting, the native asset');
+  ctx.expect(typeof payload.amount_requested === 'number' && payload.amount_paid === null && payload.shortfall === null && typeof payload.seconds_left === 'number' && payload.redirect === undefined, 'status over the Store API: the contract fields in their waiting shape, no redirect');
 
   const forged = { ...order, secret: 'not-the-key' };
   const unknown = { ...order, id: ctx.driver.unknownOrderId() };
