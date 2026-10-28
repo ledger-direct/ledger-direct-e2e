@@ -14,6 +14,19 @@ export interface CaseSpec {
   expects: string[];
   /** Cases that need the public testnet even once a local node exists (PS-04) or a long wait (PS-10). */
   nightlyOnly?: boolean;
+  /**
+   * The platforms a case exists for; absent means every one. The catalogue is
+   * platform-neutral by design, so this stays rare: PS-12 is Shopware's Store API.
+   * A run against another platform records the case as skipped, not failed.
+   */
+  targets?: readonly PlatformName[];
+}
+
+export type PlatformName = 'prestashop' | 'shopware' | 'woocommerce' | 'magento';
+
+/** Whether a case is for this platform. */
+export function appliesTo(spec: CaseSpec, platform: string): boolean {
+  return spec.targets === undefined || (spec.targets as readonly string[]).includes(platform);
 }
 
 export const CASES: readonly CaseSpec[] = [
@@ -39,6 +52,8 @@ export const CASES: readonly CaseSpec[] = [
     expects: ['status endpoint settles', 'redirect goes to an order page, not an expired return URL'], nightlyOnly: true },
   { id: 'PS-11', title: 'Closed by the merchant', asset: 'XRP', summary: 'Merchant cancels, customer pays anyway, the safety net runs.',
     expects: ['redirect present', 'no state change back to open', 'after the safety net the payment is on record for the merchant'] },
+  { id: 'PS-12', title: 'Headless: quote and status over the Store API', asset: 'XRP', summary: 'Order placed, then as a guest without a session: quote with the deepLinkCode, status over the Store API with the access key, pay, redirect; a wrong code refused like an unknown order.',
+    expects: ['quote answers 200 with page.schema_version 1 and the values the payment page shows: account, identifier, amount, payment request', 'status over the Store API answers the contract', 'a wrong code and an unknown order are refused alike, on quote and status', 'paid: status redirects to an absolute URL', 'quote refuses an order that no longer waits (410)'], targets: ['shopware'] },
 ];
 
 export function findCase(id: string): CaseSpec | undefined {

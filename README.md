@@ -18,8 +18,9 @@ Testnet only. There is no mainnet URL in this code.
 
 ## The cases
 
-Eleven cases with fixed IDs, platform-neutral, from the LedgerDirect payment-status contract. Ten
-run unattended; PS-10 waits 35 minutes and belongs to a nightly run.
+Twelve cases with fixed IDs from the LedgerDirect payment-status contract, platform-neutral but one:
+PS-12 is Shopware's Store API and runs there only (a run against another platform records it as
+skipped). Eleven run unattended; PS-10 waits 35 minutes and belongs to a nightly run.
 
 | ID | Case | What it proves |
 |---|---|---|
@@ -34,6 +35,7 @@ run unattended; PS-10 waits 35 minutes and belongs to a nightly run.
 | PS-09 | Safety net | paid, nobody polls: the platform's cron or scheduled task settles the order alone |
 | PS-10 | Late return | paid 35 minutes after checkout: settles, redirect goes to an order page, not an expired token |
 | PS-11 | Closed by the merchant | cancelled, paid anyway: redirect, no state change back to open |
+| PS-12 | Headless (Shopware) | as a guest without a session: `quote` over the Store API carries every value the payment page shows, `check` the contract; a wrong code is refused like an unknown order; paid: redirect to an absolute URL; afterwards `quote` answers 410 |
 
 `ld-e2e cases list` and `ld-e2e cases show PS-05` print the catalogue.
 
@@ -101,7 +103,7 @@ Magento 1.1.0, WooCommerce 1.3.0).
 | Platform | Driver | Notes |
 |---|---|---|
 | PrestaShop 9 | `prestashop.ts` | orders through the module's `dev/bin/e2e.php` inside the shop container; everything a customer does is HTTP |
-| Shopware 6.7 | `shopware.ts` | Store API for the order (guest registration, cart, order, handle-payment), Admin API for configuration, order state and cancelling; the scheduled task runs through the container's console |
+| Shopware 6.7 | `shopware.ts` | Store API for the order (guest registration, cart, order, handle-payment), Admin API for configuration, order state and cancelling; the scheduled task runs through the container's console. The only driver with a `headless` API (`quote` and `check` over the Store API, plugin 1.8.0), which PS-12 uses |
 | WooCommerce | `woocommerce.ts` | orders through WP-CLI in the stack's running `wp` container (a PHP script on stdin, as the gateway's `process_payment` would); page, status endpoint and the refresh form over HTTP; the Action Scheduler hook fired for the safety net |
 | Magento 2 | `magento.ts` | REST API for the order (guest cart, item, addresses, payment method), admin REST for order state and cancelling; configuration, cron job and throttle mark as PHP inside the `phpfpm` container; accepts the dev shop's self-signed certificate |
 

@@ -29,8 +29,11 @@ describe('redact', () => {
 });
 
 describe('catalogue', () => {
-  it('carries the eleven case IDs of the core catalogue', () => {
-    expect(CASES.map((c) => c.id)).toEqual(Array.from({ length: 11 }, (_, i) => `PS-${String(i + 1).padStart(2, '0')}`));
+  it('carries the eleven case IDs of the core catalogue, plus the one platform case', () => {
+    const core = Array.from({ length: 11 }, (_, i) => `PS-${String(i + 1).padStart(2, '0')}`);
+    expect(CASES.map((c) => c.id)).toEqual([...core, 'PS-12']);
+    // PS-12 is Shopware's Store API, not in the core catalogue: the only case that names its platforms.
+    expect(CASES.filter((c) => c.targets).map((c) => c.id)).toEqual(['PS-12']);
   });
 
   it('marks the wrong-asset case as testnet-only', () => {

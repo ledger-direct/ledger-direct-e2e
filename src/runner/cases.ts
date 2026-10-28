@@ -241,3 +241,66 @@ RUNNERS['PS-10'] = async (ctx) => {
   ctx.expect(evidence.paid === true, 'order is in the paid state');
   ctx.expect(evidence.payments === 1, 'exactly one payment record');
 };
+
+/**
+ * The headless case, Shopware only: the order is placed through the Store API
+ * as every Shopware order here is; what differs is the second half — the page
+ * is not read, `quote` and `check` are asked over the Store API with the
+ * sales channel's access key and the order's deepLinkCode, no session.
+ */
+RUNNERS['PS-12'] = async (ctx) => {
+  const api = ctx.driver.headless;
+  if (!api) throw new Error(`${ctx.driver.name} has no headless API`);
+  const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
+
+  const quoted = await api.quote(order);
+  ctx.expect(quoted.status === 200, `quote answers 200 as a guest with the code (got ${quoted.status})`);
+  const quote = JSON.parse(quoted.body) as { page?: Record<string, unknown> };
+  const view = quote.page ?? {};
+  ctx.expect(view.schema_version === 1 && view.state === 'waiting', 'quote.page has schema_version 1 and state waiting');
+  ctx.expect(view.destinationAccount === page.destinationAccount && String(view.destinationTag) === page.paymentIdentifier, 'quote.page names the account and identifier the page shows');
+  ctx.expect(view.amountDueDisplay === page.amountDisplayed, `quote.page.amountDueDisplay is the displayed amount (${String(view.amountDueDisplay)} vs ${page.amountDisplayed})`);
+  ctx.expect(typeof view.paymentUri === 'string' && view.paymentUri !== '' && (page.paymentUri === undefined || view.paymentUri === page.paymentUri), 'quote.page carries the payment request of the QR code');
+  for (const key of ['chain', 'assetLabel', 'network', 'explorerBase', 'secondsLeft', 'quoteSeconds', 'amountRequestedDisplay', 'issuer', 'currencyHex', 'amountDrops', 'xamanApiKey', 'walletConnectProjectId']) {
+    ctx.expect(key in view, `quote.page has ${key}`);
+  }
+
+  const status = await api.status(order);
+  ctx.expect(status.status === 200, `status over the Store API answers 200 (got ${status.status})`);
+  const payload = JSON.parse(status.body) as StatusPayload;
+  ctx.expect(payload.schema_version === 1 && payload.state === 'waiting' && payload.base_asset === ctx.ledger.nativeAsset, 'status over the Store API: schema_version 1, waiting, the native asset');
+  ctx.expect(typeof payload.amount_requested === 'number' && payload.amount_paid === null && payload.shortfall === null && typeof payload.seconds_left === 'number' && payload.redirect === undefined, 'status over the Store API: the contract fields in their waiting shape, no redirect');
+
+  const forged = { ...order, secret: 'not-the-key' };
+  const unknown = { ...order, id: ctx.driver.unknownOrderId() };
+  for (const [name, call] of [['quote', api.quote], ['status', api.status]] as const) {
+    const wrong = await call(forged);
+    const missing = await call(unknown);
+    ctx.expect(wrong.status === 403, `${name} with a wrong code is refused with 403 (got ${wrong.status})`);
+    ctx.expect(!wrong.body.includes(order.reference) && !wrong.body.includes('destinationAccount'), `${name} refusal carries no order data`);
+    ctx.expect(missing.status === wrong.status && sameRefusal(missing.body, wrong.body), `${name}: an unknown order is refused exactly like a wrong code`);
+  }
+
+  await ctx.pay(page, page.amountDisplayed);
+  const deadline = Date.now() + ctx.timeoutMs;
+  let settled: StatusPayload | undefined;
+  while (Date.now() < deadline) {
+    const answer = await api.status(order);
+    if (answer.status !== 200) throw new Error(`status over the Store API answered ${answer.status}`);
+    const payload = JSON.parse(answer.body) as StatusPayload;
+    if (ctx.states[ctx.states.length - 1] !== payload.state) {
+      ctx.states.push(payload.state);
+      ctx.evidence.push({ kind: 'state', text: `store-api poll: ${payload.state}${payload.redirect ? ' + redirect' : ''}` });
+    }
+    if (payload.redirect !== undefined) { settled = payload; break; }
+    await sleep(8000);
+  }
+  if (!settled) throw new Error(`timed out waiting for the redirect over the Store API; last state ${ctx.states[ctx.states.length - 1] ?? 'none'}`);
+  ctx.expect(settled.state === 'settled', 'state settled over the Store API');
+  ctx.expect(/^https?:\/\//.test(settled.redirect ?? ''), `redirect is an absolute URL a front end can follow (${settled.redirect})`);
+  ctx.note(`redirect: ${settled.redirect}`);
+
+  const afterwards = await api.quote(order);
+  ctx.expect(afterwards.status === 410, `quote refuses an order that no longer waits with 410 (got ${afterwards.status})`);
+};
+
