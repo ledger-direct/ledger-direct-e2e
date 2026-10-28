@@ -301,13 +301,21 @@ export class ShopwareDriver implements Driver {
     return (await this.salesChannelDomain()).salesChannelId;
   }
 
-  /** The sales channel domain the base URL belongs to — the storefront the harness buys from. */
+  /**
+   * A domain of the sales channel the access key belongs to — the one the harness buys from.
+   * Registration insists on a `storefrontUrl` among that channel's domains, so the channel is
+   * taken from the Store API context, not guessed from the base URL: a headless channel's
+   * domain is `default.headless0`, nowhere near the base URL.
+   */
   private async salesChannelDomain(): Promise<{ url: string; salesChannelId: string }> {
     if (this.domain) return this.domain;
-    const found = (await this.admin('POST', '/api/search/sales-channel-domain', { limit: 50 })) as { data: Array<{ url: string; salesChannelId: string }> };
+    const context = (await this.store('GET', '/store-api/context')).body as { salesChannel?: { id?: string } };
+    const salesChannelId = context.salesChannel?.id;
+    if (!salesChannelId) throw new Error('Shopware: the Store API context names no sales channel for this access key');
+    const found = (await this.admin('POST', '/api/search/sales-channel-domain', { limit: 50, filter: [{ type: 'equals', field: 'salesChannelId', value: salesChannelId }] })) as { data: Array<{ url: string; salesChannelId: string }> };
     const base = new URL(this.options.baseUrl);
     const match = found.data.find((d) => d.url.startsWith(`${base.protocol}//${base.host}`)) ?? found.data[0];
-    if (!match) throw new Error('Shopware: no sales channel domain found');
+    if (!match) throw new Error('Shopware: no sales channel domain found for the access key\'s sales channel');
     this.domain = { url: match.url, salesChannelId: match.salesChannelId };
     this.storefrontUrl = match.url;
     return this.domain;
