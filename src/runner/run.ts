@@ -116,8 +116,17 @@ export async function runCases(options: RunOptions): Promise<Report> {
   }
 }
 
+/**
+ * The three named sets, besides a comma-separated list of ids:
+ * - `automated`: every case with a runner that is not nightly-only — what a
+ *   developer runs against a dev shop, in minutes;
+ * - `nightly`: every case with a runner, the nightly-only ones included (PS-04
+ *   needs the public testnet's issuers, PS-10 waits 35 minutes);
+ * - `all`: the whole catalogue, cases without a runner recorded as skipped.
+ */
 export function resolveCaseIds(spec: string): string[] {
   if (spec === 'all') return CASES.map((c) => c.id);
-  if (spec === 'automated') return Object.keys(RUNNERS);
+  if (spec === 'nightly') return Object.keys(RUNNERS);
+  if (spec === 'automated') return Object.keys(RUNNERS).filter((id) => !findCase(id)?.nightlyOnly);
   return spec.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
 }

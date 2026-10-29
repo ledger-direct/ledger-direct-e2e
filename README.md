@@ -20,7 +20,10 @@ Testnet only. There is no mainnet URL in this code.
 
 Twelve cases with fixed IDs from the LedgerDirect payment-status contract, platform-neutral but one:
 PS-12 is Shopware's Store API and runs there only (a run against another platform records it as
-skipped). Eleven run unattended; PS-10 waits 35 minutes and belongs to a nightly run.
+skipped). All twelve run unattended. Two are nightly-only: PS-04 needs the public testnet's issuers,
+PS-10 waits 35 minutes for the payment token to expire. `--cases automated` is the set without those
+two, a dev-shop run in minutes; `--cases nightly` is every case; `--cases all` is the whole catalogue,
+whatever has no runner recorded as skipped.
 
 | ID | Case | What it proves |
 |---|---|---|
