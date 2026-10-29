@@ -53,7 +53,7 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'PS-11', title: 'Closed by the merchant', asset: 'XRP', summary: 'Merchant cancels, customer pays anyway, the safety net runs.',
     expects: ['redirect present', 'no state change back to open', 'after the safety net the payment is on record for the merchant'] },
   { id: 'PS-12', title: 'Headless: quote and status over the Store API', asset: 'XRP', summary: 'Order placed, then as a guest without a session: quote with the deepLinkCode, status over the Store API with the access key, pay, redirect; a wrong code refused like an unknown order.',
-    expects: ['quote answers 200 with page.schema_version 1 and the values the payment page shows: account, identifier, amount, payment request', 'status over the Store API answers the contract', 'a wrong code and an unknown order are refused alike, on quote and status', 'paid: status redirects to an absolute URL', 'quote refuses an order that no longer waits (410)'], targets: ['shopware'] },
+    expects: ['quote answers 200 with page.schema_version 1 and the values the payment page shows: account, identifier, amount, payment request', 'status over the Store API answers the contract', 'a wrong code and an unknown order are refused alike, on quote and status', 'paid: status redirects to an absolute URL and names the transaction hash', 'quote refuses an order that no longer waits (410)'], targets: ['shopware'] },
 ];
 
 export function findCase(id: string): CaseSpec | undefined {
