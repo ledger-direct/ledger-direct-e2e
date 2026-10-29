@@ -200,7 +200,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
     description: 'Starts catalogue cases against a shop on the testnet (fresh receiving account, JSON report) as a background job and returns its id at once — a run takes minutes. Poll it with job_status.',
     inputSchema: {
       target: targetSchema,
-      cases: z.string().default('automated').describe('comma-separated IDs, "automated" or "all"'),
+      cases: z.string().default('automated').describe('comma-separated IDs, "automated" (every runner but the nightly-only cases), "nightly" (every runner) or "all" (the catalogue)'),
       chain: chainSchema,
       report: z.string().default('out/report.json'),
     },

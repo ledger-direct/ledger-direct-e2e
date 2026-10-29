@@ -170,7 +170,7 @@ program
   .option('--compose-files <files>', 'WooCommerce: comma-separated compose files to pass with -f (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
   .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
   .option('--container <name>', 'Shopware: docker container for the scheduled task (LD_E2E_SHOPWARE_CONTAINER)')
-  .option('--cases <ids>', 'comma-separated case IDs, "automated", or "all"', 'automated')
+  .option('--cases <ids>', 'comma-separated case IDs, "automated" (every runner but the nightly-only cases), "nightly" (every runner), or "all" (the catalogue)', 'automated')
   .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging)')
   .option('--keep-account', "leave the run's receiving account configured; by default the shop goes back to its own (LD_E2E_<TARGET>_SHOP_ACCOUNT or the wallet file's LEDGERDIRECT_TESTNET_<TARGET>_SHOP_ADDRESS)", false)
   .option('--timeout <seconds>', 'per-case wait for a state', '240')
