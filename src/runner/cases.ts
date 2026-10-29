@@ -281,7 +281,7 @@ RUNNERS['PS-12'] = async (ctx) => {
     ctx.expect(missing.status === wrong.status && sameRefusal(missing.body, wrong.body), `${name}: an unknown order is refused exactly like a wrong code`);
   }
 
-  await ctx.pay(page, page.amountDisplayed);
+  const paid = await ctx.pay(page, page.amountDisplayed);
   const deadline = Date.now() + ctx.timeoutMs;
   let settled: StatusPayload | undefined;
   while (Date.now() < deadline) {
@@ -298,6 +298,8 @@ RUNNERS['PS-12'] = async (ctx) => {
   if (!settled) throw new Error(`timed out waiting for the redirect over the Store API; last state ${ctx.states[ctx.states.length - 1] ?? 'none'}`);
   ctx.expect(settled.state === 'settled', 'state settled over the Store API');
   ctx.expect(/^https?:\/\//.test(settled.redirect ?? ''), `redirect is an absolute URL a front end can follow (${settled.redirect})`);
+  // Plugin 1.9.0: the hash of the payment on record rides along, for the success view and the front end's order page.
+  ctx.expect((settled as StatusPayload & { hash?: string }).hash === paid.hash, 'the status names the hash of the payment that settled the order');
   ctx.note(`redirect: ${settled.redirect}`);
 
   const afterwards = await api.quote(order);

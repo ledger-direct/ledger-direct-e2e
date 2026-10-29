@@ -38,7 +38,7 @@ whatever has no runner recorded as skipped.
 | PS-09 | Safety net | paid, nobody polls: the platform's cron or scheduled task settles the order alone |
 | PS-10 | Late return | paid 35 minutes after checkout: settles, redirect goes to an order page, not an expired token |
 | PS-11 | Closed by the merchant | cancelled, paid anyway: redirect, no state change back to open |
-| PS-12 | Headless (Shopware) | as a guest without a session: `quote` over the Store API carries every value the payment page shows, `check` the contract; a wrong code is refused like an unknown order; paid: redirect to an absolute URL; afterwards `quote` answers 410 |
+| PS-12 | Headless (Shopware) | as a guest without a session: `quote` over the Store API carries every value the payment page shows, `check` the contract; a wrong code is refused like an unknown order; paid: redirect to an absolute URL with the transaction hash (plugin 1.9.0); afterwards `quote` answers 410 |
 
 `ld-e2e cases list` and `ld-e2e cases show PS-05` print the catalogue.
 
