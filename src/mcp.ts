@@ -191,7 +191,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
 
   server.registerTool('list_cases', {
     title: 'List cases',
-    description: 'The payment-status case catalogue PS-01…PS-11 with what each case proves.',
+    description: 'The payment-status case catalogue PS-01…PS-12 with what each case proves.',
     inputSchema: {},
   }, async () => text(CASES));
 
