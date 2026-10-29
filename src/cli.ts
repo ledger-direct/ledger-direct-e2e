@@ -18,7 +18,7 @@ import { resolveCaseIds, runCases } from './runner/run.js';
 const program = new Command();
 program
   .name('ld-e2e')
-  .description('LedgerDirect end-to-end harness — testnet wallets, payments, and the PS-01…PS-11 catalogue, on XRPL and Stellar')
+  .description('LedgerDirect end-to-end harness — testnet wallets, payments, and the PS-01…PS-12 catalogue, on XRPL and Stellar')
   .option('--json', 'machine-readable output')
   .option('--chain <chain>', `chain to operate on: ${CHAINS.join(' | ')}`, 'XRPL')
   .version('0.1.0');
@@ -149,7 +149,7 @@ program
     }
   });
 
-const cases = program.command('cases').description('the PS-01…PS-11 catalogue');
+const cases = program.command('cases').description('the PS-01…PS-12 catalogue');
 cases
   .command('list')
   .action(() => out(CASES, () => CASES.map((c) => `${c.id}  ${c.title}${c.nightlyOnly ? '  (nightly only)' : ''}${c.targets ? `  (${c.targets.join(', ')} only)` : ''}`).join('\n')));
