@@ -221,7 +221,10 @@ payments and have their own `--max-xrp`.
 Every HTTP request to a shop, the faucet or Friendbot goes through `httpFetch()` (`src/http.ts`) and
 gives up after `LD_E2E_HTTP_TIMEOUT_MS` (default 30000; the faucet and Friendbot get 60 s). Without a
 deadline, a request on a stale keep-alive connection hung a run for 35 minutes; now the case fails
-with the method, host and path of the request (never its query, which carries order keys).
+with the method, host and path of the request. The deadline covers reading the body as well. The
+message drops the query and masks every path segment that looks like an identifier (eight or more
+characters with a digit) — WooCommerce carries the order key in the path, and the message goes into
+the report.
 
 ## Wallets
 

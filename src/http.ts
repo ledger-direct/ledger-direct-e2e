@@ -9,29 +9,50 @@ export function httpTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
   return ms;
 }
 
+const BODY_READERS = ['text', 'json', 'arrayBuffer', 'blob', 'formData', 'bytes'] as const;
+
 /**
  * `fetch` with a deadline. Without one, a request on a stale keep-alive
  * connection can hang for as long as the run lasts (seen in PS-12: 35 minutes
- * after `placeOrder()`, no request reached the shop). The signal also covers
- * reading the body. The error names method, host and path, never the query,
- * which carries order keys.
+ * after `placeOrder()`, no request reached the shop). The deadline covers
+ * reading the body too, and a timeout there gets the same message. The message
+ * names method, host and a masked path: no query, and no segment that looks
+ * like an identifier — WooCommerce carries the order key in the path, and the
+ * message ends up in the report.
  */
 export async function httpFetch(input: string | URL, init: RequestInit = {}, timeoutMs = httpTimeoutMs()): Promise<Response> {
   const signal = init.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs);
+  const translate = (error: unknown): unknown =>
+    isTimeout(error) ? new Error(`${init.method ?? 'GET'} ${describeUrl(input)} got no answer within ${timeoutMs} ms`) : error;
+  let response: Response;
   try {
-    return await fetch(input, { ...init, signal });
+    response = await fetch(input, { ...init, signal });
   } catch (error) {
-    if (error instanceof DOMException && error.name === 'TimeoutError') {
-      throw new Error(`${init.method ?? 'GET'} ${describe(input)} got no answer within ${timeoutMs} ms`);
-    }
-    throw error;
+    throw translate(error);
   }
+  for (const name of BODY_READERS) {
+    const read = response[name]?.bind(response) as (() => Promise<unknown>) | undefined;
+    if (!read) continue;
+    Object.defineProperty(response, name, {
+      value: () => read().catch((error: unknown) => { throw translate(error); }),
+    });
+  }
+  return response;
 }
 
-function describe(input: string | URL): string {
+function isTimeout(error: unknown): boolean {
+  return error instanceof DOMException && error.name === 'TimeoutError';
+}
+
+/** Origin and path, with the query dropped and every segment of eight or more characters that contains a digit masked. */
+export function describeUrl(input: string | URL): string {
   try {
     const url = new URL(input);
-    return `${url.origin}${url.pathname}`;
+    const path = url.pathname
+      .split('/')
+      .map((segment) => (segment.length >= 8 && /\d/.test(segment) ? '…' : segment))
+      .join('/');
+    return `${url.origin}${path}`;
   } catch {
     return '(unparsable URL)';
   }
