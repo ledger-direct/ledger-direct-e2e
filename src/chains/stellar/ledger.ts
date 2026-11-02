@@ -1,5 +1,6 @@
 import { Asset, BASE_FEE, Horizon, Keypair, Memo, Networks, Operation, TransactionBuilder } from '@stellar/stellar-sdk';
 import type { Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult } from '../chain.js';
+import { httpFetch } from '../../http.js';
 import { parseStellarIncoming } from './incoming.js';
 import { NATIVE, TESTNET_EXPLORER_TX, TESTNET_FRIENDBOT, TESTNET_HORIZON, TESTNET_ISSUED } from './assets.js';
 
@@ -35,7 +36,7 @@ export class StellarLedger implements Ledger {
   }
 
   async fund(address: string): Promise<{ address: string; amount: string }> {
-    const response = await fetch(`${TESTNET_FRIENDBOT}?addr=${encodeURIComponent(address)}`);
+    const response = await httpFetch(`${TESTNET_FRIENDBOT}?addr=${encodeURIComponent(address)}`, {}, 60_000);
     if (!response.ok) throw new Error(`Friendbot answered ${response.status} ${response.statusText}`);
     return { address, amount: '10000' };
   }

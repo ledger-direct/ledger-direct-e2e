@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
@@ -147,7 +148,7 @@ export class ShopwareDriver implements Driver {
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
-    const response = await fetch(this.pageUrl(order), { redirect: 'manual' });
+    const response = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
     if (response.status !== 200) throw new Error(`Shopware: payment page answered ${response.status}`);
     const html = await response.text();
     const page = readPaymentPage(html);
@@ -170,18 +171,18 @@ export class ShopwareDriver implements Driver {
     url.searchParams.set('deepLinkCode', order.secret);
     const returnUrl = this.secretOf.get(order.id)?.returnUrl;
     if (returnUrl) url.searchParams.set('returnUrl', returnUrl);
-    const response = await fetch(url, { headers: { 'sw-access-key': this.options.accessKey, Accept: 'application/json' } });
+    const response = await httpFetch(url, { headers: { 'sw-access-key': this.options.accessKey, Accept: 'application/json' } });
     return { status: response.status, body: await response.text() };
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {
-    const response = await fetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
+    const response = await httpFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`Shopware: status endpoint answered ${response.status}`);
     return (await response.json()) as StatusPayload;
   }
 
   async statusResponse(order: PlacedOrder): Promise<{ status: number; body: string }> {
-    const response = await fetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
+    const response = await httpFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
     return { status: response.status, body: await response.text() };
   }
 
@@ -190,14 +191,14 @@ export class ShopwareDriver implements Driver {
   }
 
   async pageResponse(order: PlacedOrder): Promise<{ status: number }> {
-    const response = await fetch(this.pageUrl(order), { redirect: 'manual' });
+    const response = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
     return { status: response.status };
   }
 
   async refresh(order: PlacedOrder): Promise<void> {
     const url = new URL(`${this.options.baseUrl}/ledger-direct/payment/refresh/${order.id}`);
     url.searchParams.set('deepLinkCode', order.secret);
-    await fetch(url, { method: 'POST', redirect: 'manual' });
+    await httpFetch(url, { method: 'POST', redirect: 'manual' });
   }
 
   async close(order: PlacedOrder): Promise<void> {
@@ -359,7 +360,7 @@ export class ShopwareDriver implements Driver {
   private async store(method: string, path: string, body?: unknown, contextToken?: string): Promise<{ body: unknown; headers: Headers }> {
     const headers: Record<string, string> = { 'sw-access-key': this.options.accessKey, Accept: 'application/json', 'Content-Type': 'application/json' };
     if (contextToken) headers['sw-context-token'] = contextToken;
-    const response = await fetch(`${this.options.baseUrl}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await httpFetch(`${this.options.baseUrl}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await response.text();
     if (!response.ok) throw new Error(`Shopware store-api ${method} ${path} answered ${response.status}: ${text.slice(0, 300)}`);
     return { body: text ? JSON.parse(text) : null, headers: response.headers };
@@ -367,7 +368,7 @@ export class ShopwareDriver implements Driver {
 
   private async admin(method: string, path: string, body?: unknown, retry = true): Promise<unknown> {
     const token = await this.token();
-    const response = await fetch(`${this.options.baseUrl}${path}`, {
+    const response = await httpFetch(`${this.options.baseUrl}${path}`, {
       method,
       headers: { Authorization: `Bearer ${token}`, Accept: 'application/json', 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -384,7 +385,7 @@ export class ShopwareDriver implements Driver {
 
   private async token(): Promise<string> {
     if (this.adminToken) return this.adminToken;
-    const response = await fetch(`${this.options.baseUrl}/api/oauth/token`, {
+    const response = await httpFetch(`${this.options.baseUrl}/api/oauth/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ grant_type: 'password', client_id: 'administration', scopes: 'write', username: this.options.adminUser ?? 'admin', password: this.options.adminPassword ?? 'shopware' }),

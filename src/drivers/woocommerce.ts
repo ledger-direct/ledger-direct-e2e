@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
 
 export interface WooCommerceOptions {
@@ -102,7 +103,7 @@ echo json_encode(['id' => $order->get_id(), 'number' => $order->get_order_number
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
-    const response = await fetch(this.pageUrl(order), { redirect: 'manual' });
+    const response = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
     if (response.status !== 200) throw new Error(`WooCommerce: payment page answered ${response.status}`);
     const html = await response.text();
     const page = readPaymentPage(html);
@@ -111,13 +112,13 @@ echo json_encode(['id' => $order->get_id(), 'number' => $order->get_order_number
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {
-    const response = await fetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
+    const response = await httpFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`WooCommerce: status endpoint answered ${response.status}`);
     return (await response.json()) as StatusPayload;
   }
 
   async statusResponse(order: PlacedOrder): Promise<{ status: number; body: string }> {
-    const response = await fetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
+    const response = await httpFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
     return { status: response.status, body: await response.text() };
   }
 
@@ -131,16 +132,16 @@ echo json_encode(['id' => $order->get_id(), 'number' => $order->get_order_number
   }
 
   async pageResponse(order: PlacedOrder): Promise<{ status: number }> {
-    const response = await fetch(this.pageUrl(order), { redirect: 'manual' });
+    const response = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
     return { status: response.status };
   }
 
   /** The "get an updated amount" form of the expired block: a POST with the nonce the page rendered. */
   async refresh(order: PlacedOrder): Promise<void> {
-    const html = await (await fetch(this.pageUrl(order), { redirect: 'manual' })).text();
+    const html = await (await httpFetch(this.pageUrl(order), { redirect: 'manual' })).text();
     const nonce = html.match(/name="_wpnonce" value="([^"]+)"/)?.[1];
     if (!nonce) throw new Error(`WooCommerce: the payment page for order ${order.id} shows no refresh form (quote not expired?)`);
-    await fetch(this.pageUrl(order), {
+    await httpFetch(this.pageUrl(order), {
       method: 'POST',
       body: new URLSearchParams({ 'ledger-direct-payment': this.keyOf(order), ledger_direct_refresh: '1', _wpnonce: nonce }),
       redirect: 'manual',
