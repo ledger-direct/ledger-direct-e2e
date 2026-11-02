@@ -26,4 +26,13 @@ describe('refusalLeaks (PS-07)', () => {
   it('finds the payment page markup in an HTML body', () => {
     expect(refusalLeaks('<div data-ld-state="waiting"></div>', 'x')).toEqual(['payment page markup']);
   });
+
+  it('finds contract fields and markup nested in a JSON refusal', () => {
+    expect(refusalLeaks('{"error":"forbidden","details":{"state":"waiting","amount_requested":"1"}}', 'x')).toEqual(['field state', 'field amount_requested']);
+    expect(refusalLeaks('[{"error":"forbidden","html":"<div data-ld-state=\\"waiting\\"></div>"}]', 'x')).toEqual(['payment page markup']);
+  });
+
+  it('finds a contract field with whitespace before the colon in an HTML body', () => {
+    expect(refusalLeaks('<script>const order = { "state" : "waiting" }</script>', 'x')).toEqual(['field state']);
+  });
 });
