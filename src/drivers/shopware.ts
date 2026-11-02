@@ -235,12 +235,13 @@ export class ShopwareDriver implements Driver {
   /**
    * The plugin logs one debug line per actual ledger sync ("LedgerDirect: ledger synced"),
    * in dev.log when APP_ENV=dev. Counting those lines is the observable PS-08 needs; the
-   * throttle mark itself lives in the app cache, out of reach. Null when the log is not there.
+   * throttle mark itself lives in the app cache, out of reach. Null when the log is not there
+   * (APP_ENV=prod writes no debug lines): "not observable", and PS-08 falls back to timing.
    */
   async nodeRequests(): Promise<number | null> {
     const container = this.options.container ?? 'shopware6_672-shopware-1';
     try {
-      const { stdout } = await run('docker', ['exec', container, 'bash', '-lc', 'grep -c "LedgerDirect: ledger synced" /var/www/html/var/log/dev.log 2>/dev/null || echo 0']);
+      const { stdout } = await run('docker', ['exec', container, 'bash', '-lc', 'f=/var/www/html/var/log/dev.log; [ -f "$f" ] || { echo none; exit 0; }; grep -c "LedgerDirect: ledger synced" "$f" || true']);
       const n = Number.parseInt(stdout.trim(), 10);
       return Number.isNaN(n) ? null : n;
     } catch {
