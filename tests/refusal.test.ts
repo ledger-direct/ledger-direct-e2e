@@ -35,4 +35,15 @@ describe('refusalLeaks (PS-07)', () => {
   it('finds a contract field with whitespace before the colon in an HTML body', () => {
     expect(refusalLeaks('<script>const order = { "state" : "waiting" }</script>', 'x')).toEqual(['field state']);
   });
+
+  it('finds contract fields and markup in stringified JSON and HTML inside string values', () => {
+    expect(refusalLeaks('{"error":"forbidden","details":"{\\"state\\":\\"waiting\\"}"}', 'x')).toEqual(['field state']);
+    expect(refusalLeaks(JSON.stringify({ error: 'forbidden', details: JSON.stringify({ inner: JSON.stringify({ amount_paid: '1' }) }) }), 'x')).toEqual(['field amount_paid']);
+    expect(refusalLeaks(JSON.stringify({ error: 'forbidden', html: '<script>const o = { "seconds_left" : 120 }</script>' }), 'x')).toEqual(['field seconds_left']);
+  });
+
+  it('accepts string values that only mention contract words', () => {
+    expect(refusalLeaks('{"error":"forbidden","message":"state unknown, amount_paid not shown"}', 'x')).toEqual([]);
+    expect(refusalLeaks('{"error":"forbidden","code":"403"}', 'x')).toEqual([]);
+  });
 });
