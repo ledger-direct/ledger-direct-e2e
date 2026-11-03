@@ -85,23 +85,38 @@ describe('tryAccountFromLog', () => {
 });
 
 describe('tryLogSource', () => {
-  it('reads the preset container by default', () => {
-    expect(tryLogSource('magento')).toEqual({ args: ['logs', 'ledger-direct-try-magento-phpfpm-1'] });
+  it('addresses the preset project by default, as the driver does', () => {
+    expect(tryLogSource('magento')).toEqual({ args: ['compose', '-p', 'ledger-direct-try-magento', 'logs', '--no-color', '--no-log-prefix', 'phpfpm'], cwd: undefined });
   });
 
-  it('reads the stack chosen with --compose-dir, through its service', () => {
+  it('reads the stack chosen with --compose-dir from that folder, without the preset project', () => {
     expect(tryLogSource('woocommerce', { composeDir: '/x/dev/try' })).toEqual({
       args: ['compose', 'logs', '--no-color', '--no-log-prefix', 'wp'], cwd: '/x/dev/try',
     });
   });
 
-  it('passes the compose files chosen with --compose-files, as the driver does', () => {
+  it('passes the compose files and the folder, as the driver does', () => {
     expect(tryLogSource('woocommerce', { composeDir: '/x', composeFiles: ['compose.yaml', 'compose.try.yaml'] })).toEqual({
       args: ['compose', '-f', 'compose.yaml', '-f', 'compose.try.yaml', 'logs', '--no-color', '--no-log-prefix', 'wp'], cwd: '/x',
     });
   });
 
+  it('keeps the preset project with compose files but no folder, as the driver does', () => {
+    expect(tryLogSource('woocommerce', { composeFiles: ['/x/compose.yaml'] })).toEqual({
+      args: ['compose', '-f', '/x/compose.yaml', '-p', 'ledger-direct-try-woocommerce', 'logs', '--no-color', '--no-log-prefix', 'wp'], cwd: undefined,
+    });
+  });
+
   it('reads the container chosen with --container', () => {
     expect(tryLogSource('shopware', { container: 'other-shopware-1', composeDir: '/ignored' })).toEqual({ args: ['logs', 'other-shopware-1'] });
+  });
+
+  it('matches what createDriver hands the driver for every selection', () => {
+    for (const composeDir of [undefined, '/x']) {
+      const driver = optionsOf(createDriver('woocommerce', { try: true, composeDir, composeFiles: ['c.yaml'] }).driver);
+      const args = tryLogSource('woocommerce', { composeDir, composeFiles: ['c.yaml'] }).args;
+      expect(args.includes('-p')).toBe(driver.composeProject !== undefined);
+      if (driver.composeProject) expect(args[args.indexOf('-p') + 1]).toBe(driver.composeProject);
+    }
   });
 });

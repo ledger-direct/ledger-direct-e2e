@@ -14,9 +14,9 @@ const run = promisify(execFile);
 export interface TryPreset {
   baseUrl: string;
   composeProject: string;
-  /** The container whose log names the shop's own receiving account. */
+  /** The shop's container (Shopware's driver runs its console in it). */
   container: string;
-  /** The compose service of that container, for a stack chosen with --compose-dir. */
+  /** The shop's compose service; its log names the shop's own receiving account. */
   service: string;
   accessKey?: string;
   adminUser?: string;
@@ -76,18 +76,17 @@ export interface TrySelection {
 }
 
 /**
- * Where the selected try shop's log comes from: an explicit --container, else the compose service
- * of the stack chosen with --compose-dir and/or --compose-files (the same `-f` files the driver
- * uses), else the preset container.
+ * Where the selected try shop's log comes from. An explicit --container wins. Otherwise the stack
+ * is addressed exactly as the driver addresses it (createDriver): the same `-f` files, the same
+ * folder, and the preset's project name only when no folder was chosen. One rule for both, so the
+ * account can never come from another stack than the one the run talks to.
  */
 export function tryLogSource(target: Target, selection: TrySelection = {}): { args: string[]; cwd?: string } {
   const preset = TRY_PRESETS[target];
   if (selection.container) return { args: ['logs', selection.container] };
-  const files = selection.composeFiles ?? [];
-  if (selection.composeDir || files.length > 0) {
-    return { args: ['compose', ...files.flatMap((f) => ['-f', f]), 'logs', '--no-color', '--no-log-prefix', preset.service], cwd: selection.composeDir };
-  }
-  return { args: ['logs', preset.container] };
+  const files = (selection.composeFiles ?? []).flatMap((f) => ['-f', f]);
+  const project = selection.composeDir ? [] : ['-p', preset.composeProject];
+  return { args: ['compose', ...files, ...project, 'logs', '--no-color', '--no-log-prefix', preset.service], cwd: selection.composeDir };
 }
 
 /** Reads the selected try shop's own receiving account from its log; undefined if it is not running or never logged one. */
