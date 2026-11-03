@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createDriver } from '../src/drivers/factory.js';
-import { TRY_PRESETS, tryAccountFromLog } from '../src/drivers/try.js';
+import { TRY_PRESETS, tryAccountFromLog, tryLogSource } from '../src/drivers/try.js';
 import { isolateEnv } from './env.js';
 
 /** The options a driver was built with; every driver keeps them in `options`. */
@@ -81,5 +81,21 @@ describe('tryAccountFromLog', () => {
 
   it('is undefined for a log without that line', () => {
     expect(tryAccountFromLog('Starting Apache\n')).toBeUndefined();
+  });
+});
+
+describe('tryLogSource', () => {
+  it('reads the preset container by default', () => {
+    expect(tryLogSource('magento')).toEqual({ args: ['logs', 'ledger-direct-try-magento-phpfpm-1'] });
+  });
+
+  it('reads the stack chosen with --compose-dir, through its service', () => {
+    expect(tryLogSource('woocommerce', { composeDir: '/x/dev/try' })).toEqual({
+      args: ['compose', 'logs', '--no-color', '--no-log-prefix', 'wp'], cwd: '/x/dev/try',
+    });
+  });
+
+  it('reads the container chosen with --container', () => {
+    expect(tryLogSource('shopware', { container: 'other-shopware-1', composeDir: '/ignored' })).toEqual({ args: ['logs', 'other-shopware-1'] });
   });
 });

@@ -16,6 +16,8 @@ export interface TryPreset {
   composeProject: string;
   /** The container whose log names the shop's own receiving account. */
   container: string;
+  /** The compose service of that container, for a stack chosen with --compose-dir. */
+  service: string;
   accessKey?: string;
   adminUser?: string;
   adminPassword?: string;
@@ -29,17 +31,20 @@ export const TRY_PRESETS: Record<Target, TryPreset> = {
     baseUrl: 'http://localhost:8088',
     composeProject: 'ledger-direct-try-magento',
     container: 'ledger-direct-try-magento-phpfpm-1',
+    service: 'phpfpm',
     ...DEMO_ADMIN,
   },
   prestashop: {
     baseUrl: 'http://localhost:8089',
     composeProject: 'ledger-direct-try-prestashop',
     container: 'ledger-direct-try-prestashop-prestashop-1',
+    service: 'prestashop',
   },
   shopware: {
     baseUrl: 'http://localhost:8091',
     composeProject: 'ledger-direct-try-shopware',
     container: 'ledger-direct-try-shopware-shopware-1',
+    service: 'shopware',
     accessKey: 'SWSCLEDGERDIRECTTRYSHOP000',
     testProductNumber: 'ledger-direct-demo',
     ...DEMO_ADMIN,
@@ -48,6 +53,7 @@ export const TRY_PRESETS: Record<Target, TryPreset> = {
     baseUrl: 'http://localhost:8092',
     composeProject: 'ledger-direct-try-woocommerce',
     container: 'ledger-direct-try-woocommerce-wp-1',
+    service: 'wp',
   },
 };
 
@@ -61,10 +67,28 @@ export function tryAccountFromLog(log: string): string | undefined {
   return matches.at(-1)?.[1];
 }
 
-/** Reads the try shop's own receiving account from its container log; undefined if it is not running or never logged one. */
-export async function tryShopAccount(target: Target): Promise<string | undefined> {
+/** Which try shop to read: the one the driver talks to, so a run never restores another stack's account. */
+export interface TrySelection {
+  composeDir?: string;
+  container?: string;
+}
+
+/**
+ * Where the selected try shop's log comes from: an explicit --container, else the compose service
+ * of an explicit --compose-dir, else the preset container.
+ */
+export function tryLogSource(target: Target, selection: TrySelection = {}): { args: string[]; cwd?: string } {
+  const preset = TRY_PRESETS[target];
+  if (selection.container) return { args: ['logs', selection.container] };
+  if (selection.composeDir) return { args: ['compose', 'logs', '--no-color', '--no-log-prefix', preset.service], cwd: selection.composeDir };
+  return { args: ['logs', preset.container] };
+}
+
+/** Reads the selected try shop's own receiving account from its log; undefined if it is not running or never logged one. */
+export async function tryShopAccount(target: Target, selection: TrySelection = {}): Promise<string | undefined> {
+  const { args, cwd } = tryLogSource(target, selection);
   try {
-    const { stdout, stderr } = await run('docker', ['logs', TRY_PRESETS[target].container], { maxBuffer: 32 * 1024 * 1024 });
+    const { stdout, stderr } = await run('docker', args, { cwd, maxBuffer: 32 * 1024 * 1024 });
     return tryAccountFromLog(stdout + '\n' + stderr);
   } catch {
     return undefined;

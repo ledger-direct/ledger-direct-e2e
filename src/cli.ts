@@ -10,7 +10,8 @@ import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { balances as xrplBalances } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
-import { TRY_PRESETS, tryShopAccount } from './drivers/try.js';
+import { TRY_PRESETS, tryShopAccount, type TrySelection } from './drivers/try.js';
+import type { Target } from './drivers/factory.js';
 import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount, shopAccountVariables } from './runner/defaults.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
@@ -166,14 +167,20 @@ cases
  * The try shop's own receiving account, read from its container log before the run, so the run can
  * put it back afterwards. Without it a try run would restore the dev shop's account from testnet.env.
  */
-async function tryAccountOrFail(target: string): Promise<string> {
-  if (!isTarget(target)) throw new Error(`no driver for ${target} — targets: ${TARGETS.join(', ')}`);
-  if (chain() !== 'XRPL') throw new Error('--try: the try stacks run on the XRP Ledger testnet only');
-  const account = await tryShopAccount(target);
+async function tryAccountOrFail(target: string, selection: TrySelection): Promise<string> {
+  assertTry(target);
+  const account = await tryShopAccount(target as Target, selection);
   if (!account) {
-    throw new Error(`--try: no receiving account in the log of ${TRY_PRESETS[target].container}. Is the try stack running? Start it with \`docker compose up -d --wait\` in dev/try`);
+    const where = selection.container ?? (selection.composeDir ? `the stack in ${selection.composeDir}` : TRY_PRESETS[target as Target].container);
+    throw new Error(`--try: no receiving account in the log of ${where}. Is the try stack running? Start it with \`docker compose up -d --wait\` in dev/try`);
   }
   return account;
+}
+
+/** Every --try invocation: a known target on the XRP Ledger, checked before any driver is built. */
+function assertTry(target: string): void {
+  if (!isTarget(target)) throw new Error(`no driver for ${target} — targets: ${TARGETS.join(', ')}`);
+  if (chain() !== 'XRPL') throw new Error('--try: the try stacks run on the XRP Ledger testnet only');
 }
 
 program
@@ -192,6 +199,7 @@ program
   .option('--timeout <seconds>', 'per-case wait for a state', '240')
   .option('--report <file>', 'JSON report path', 'out/report.json')
   .action(async (opts: { target: string; try: boolean; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string; cases: string; receivingAccount?: string; keepAccount: boolean; timeout: string; report: string }) => {
+    if (opts.try) assertTry(opts.target);
     const { driver, baseUrl } = createDriver(opts.target, {
       try: opts.try,
       baseUrl: opts.baseUrl,
@@ -207,7 +215,7 @@ program
       caseIds: resolveCaseIds(opts.cases),
       receivingAccount: opts.receivingAccount,
       keepAccount: opts.keepAccount,
-      restoreAccount: opts.try && !opts.keepAccount ? await tryAccountOrFail(opts.target) : undefined,
+      restoreAccount: opts.try && !opts.keepAccount ? await tryAccountOrFail(opts.target, { composeDir: opts.composeDir, container: opts.container }) : undefined,
       timeoutMs: Number.parseInt(opts.timeout, 10) * 1000,
       version: program.version() ?? '0.0.0',
       log: (line) => process.stderr.write(redact(line) + '\n'),
@@ -234,7 +242,8 @@ shop
   .option('--container <name>', 'Shopware: docker container (LD_E2E_SHOPWARE_CONTAINER)')
   .action(async (opts: { target: string; try: boolean; account?: string; quoteExpiry: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
     if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
-    const account = opts.account ?? (opts.try ? await tryAccountOrFail(opts.target) : defaultShopAccount(opts.target, chain()));
+    if (opts.try) assertTry(opts.target);
+    const account = opts.account ?? (opts.try ? await tryAccountOrFail(opts.target, { composeDir: opts.composeDir, container: opts.container }) : defaultShopAccount(opts.target, chain()));
     const [harnessVariable, walletVariable] = shopAccountVariables(opts.target, chain());
     if (!account) {
       throw new Error(`no ${chain()} shop account known for ${opts.target}: pass --account, or set ${harnessVariable} or ${walletVariable}`);
