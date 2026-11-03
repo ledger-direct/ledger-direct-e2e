@@ -10,6 +10,8 @@ const run = promisify(execFile);
 export interface PrestaShopOptions {
   /** The harness folder holding docker-compose.yml (the module is mounted into that container). */
   composeDir: string;
+  /** A running compose project to address by name (`docker compose -p`) instead of the folder. */
+  composeProject?: string;
   /** How the shop is reached over HTTP from this machine. */
   baseUrl: string;
   service?: string;
@@ -119,11 +121,11 @@ export class PrestaShopDriver implements Driver {
   }
 
   private async helper(command: string, args: Record<string, string>): Promise<unknown> {
-    if (!this.composeChecked) {
+    if (!this.composeChecked && !this.options.composeProject) {
       assertComposeDir('prestashop', this.options.composeDir);
       this.composeChecked = true;
     }
-    const argv = ['compose', 'exec', '-T', '-u', 'www-data', this.options.service ?? 'prestashop', 'php', '/var/www/html/modules/ledgerdirect/dev/bin/e2e.php', command, ...Object.entries(args).map(([k, v]) => `--${k}=${v}`)];
+    const argv = ['compose', ...(this.options.composeProject ? ['-p', this.options.composeProject] : []), 'exec', '-T', '-u', 'www-data', this.options.service ?? 'prestashop', 'php', '/var/www/html/modules/ledgerdirect/dev/bin/e2e.php', command, ...Object.entries(args).map(([k, v]) => `--${k}=${v}`)];
     const { stdout } = await run('docker', argv, { cwd: this.options.composeDir, maxBuffer: 4 * 1024 * 1024 }).catch((e: unknown) => {
       throw explainComposeError('prestashop', this.options.composeDir, e);
     });

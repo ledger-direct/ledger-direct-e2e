@@ -242,6 +242,34 @@ ld-e2e --chain STELLAR pay --to G... --id 123 --amount 1.5                    # 
 On Stellar, issued assets (USDC, EURC) are not listed until the core's Stellar registry ships;
 `wallet status` shows XLM only, and a test asset can be issued for the wrong-asset case.
 
+## Try stacks
+
+Each plugin repository has a try stack in `dev/try`: a complete shop with the plugin on the
+testnet, started with `docker compose up -d --wait`. `--try` runs against it instead of the dev
+shop, with nothing else to set:
+
+```
+ld-e2e run --target shopware --try               # also: magento, woocommerce, prestashop
+ld-e2e run --target magento --try --cases PS-07  # a single case
+ld-e2e shop reset --target shopware --try        # back to the try shop's own account
+```
+
+| Target | Shop | Compose project | Also set by `--try` |
+|---|---|---|---|
+| magento | http://localhost:8088 | `ledger-direct-try-magento` | demo admin login |
+| prestashop | http://localhost:8089 | `ledger-direct-try-prestashop` | |
+| shopware | http://localhost:8091 | `ledger-direct-try-shopware` | access key, container, demo admin login, test article |
+| woocommerce | http://localhost:8092 | `ledger-direct-try-woocommerce` | |
+
+The values are the try stacks' public demo settings (their READMEs and `dev/try/compose.yaml`).
+The driver reaches the shop's container through the compose project name, so the command works
+from any folder. `--try` ignores the `LD_E2E_<TARGET>_*` variables, because they describe the dev
+shop. Command-line options still win: if `LD_TRY_PORT` moved the shop, pass `--base-url`.
+
+Afterwards the try shop goes back to its own receiving account. That is the account it logged on
+its last start (`[ledger-direct-try] receiving account: r…`), not the dev shop's from the wallet
+file. The try stacks run on the XRP Ledger testnet, so `--try` is XRPL only.
+
 ## The shop's own account
 
 A run configures a fresh throwaway account as the shop's receiving account; nothing else is

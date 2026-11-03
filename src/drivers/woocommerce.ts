@@ -8,6 +8,8 @@ export interface WooCommerceOptions {
   composeDir: string;
   /** Compose files to pass with -f, in order; the folder's default file when empty. */
   composeFiles?: string[];
+  /** A running compose project to address by name (`docker compose -p`) instead of the folder. */
+  composeProject?: string;
   /** The running compose service that has WordPress and WP-CLI (default: wp). `exec`, not `run`: a fresh container per call costs seconds, and PS-08 measures a 5-second window. */
   service?: string;
   /** How the shop is reached over HTTP from this machine, e.g. http://localhost:8082 */
@@ -247,6 +249,7 @@ echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transaction
     const argv = [
       'compose',
       ...(this.options.composeFiles ?? []).flatMap((f) => ['-f', f]),
+      ...(this.options.composeProject ? ['-p', this.options.composeProject] : []),
       'exec', '-T', this.options.service ?? 'wp',
       'wp', 'eval-file', '-', ...args, '--allow-root',
     ];

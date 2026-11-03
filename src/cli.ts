@@ -10,6 +10,7 @@ import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { balances as xrplBalances } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
+import { TRY_PRESETS, tryShopAccount } from './drivers/try.js';
 import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount, shopAccountVariables } from './runner/defaults.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
@@ -161,10 +162,25 @@ cases
     out(c, () => [`${c.id} — ${c.title}`, `asset: ${c.asset}`, c.summary, ...c.expects.map((e) => `  - ${e}`)].join('\n'));
   });
 
+/**
+ * The try shop's own receiving account, read from its container log before the run, so the run can
+ * put it back afterwards. Without it a try run would restore the dev shop's account from testnet.env.
+ */
+async function tryAccountOrFail(target: string): Promise<string> {
+  if (!isTarget(target)) throw new Error(`no driver for ${target} — targets: ${TARGETS.join(', ')}`);
+  if (chain() !== 'XRPL') throw new Error('--try: the try stacks run on the XRP Ledger testnet only');
+  const account = await tryShopAccount(target);
+  if (!account) {
+    throw new Error(`--try: no receiving account in the log of ${TRY_PRESETS[target].container}. Is the try stack running? Start it with \`docker compose up -d --wait\` in dev/try`);
+  }
+  return account;
+}
+
 program
   .command('run')
   .description('run catalogue cases against a plugin and write the report')
   .requiredOption('--target <plugin>', TARGETS.join(' | '))
+  .option('--try', "the plugin's try stack (dev/try, docker compose up) instead of the dev shop: its port, compose project and demo logins; afterwards the shop goes back to its own account", false)
   .option('--base-url <url>', 'how the shop is reached from here (default per target: LD_E2E_<TARGET>_BASE_URL or the dev-stack port)')
   .option('--compose-dir <dir>', "PrestaShop, WooCommerce, Magento: the shop's compose folder (LD_E2E_<TARGET>_COMPOSE_DIR)")
   .option('--compose-files <files>', 'WooCommerce: comma-separated compose files to pass with -f (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
@@ -175,8 +191,9 @@ program
   .option('--keep-account', "leave the run's receiving account configured; by default the shop goes back to its own (LD_E2E_<TARGET>_SHOP_ACCOUNT or the wallet file's LEDGERDIRECT_TESTNET_<TARGET>_SHOP_ADDRESS)", false)
   .option('--timeout <seconds>', 'per-case wait for a state', '240')
   .option('--report <file>', 'JSON report path', 'out/report.json')
-  .action(async (opts: { target: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string; cases: string; receivingAccount?: string; keepAccount: boolean; timeout: string; report: string }) => {
+  .action(async (opts: { target: string; try: boolean; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string; cases: string; receivingAccount?: string; keepAccount: boolean; timeout: string; report: string }) => {
     const { driver, baseUrl } = createDriver(opts.target, {
+      try: opts.try,
       baseUrl: opts.baseUrl,
       composeDir: opts.composeDir,
       composeFiles: opts.composeFiles?.split(',').map((f) => f.trim()).filter(Boolean),
@@ -190,6 +207,7 @@ program
       caseIds: resolveCaseIds(opts.cases),
       receivingAccount: opts.receivingAccount,
       keepAccount: opts.keepAccount,
+      restoreAccount: opts.try && !opts.keepAccount ? await tryAccountOrFail(opts.target) : undefined,
       timeoutMs: Number.parseInt(opts.timeout, 10) * 1000,
       version: program.version() ?? '0.0.0',
       log: (line) => process.stderr.write(redact(line) + '\n'),
@@ -208,14 +226,15 @@ shop
   .requiredOption('--target <plugin>', TARGETS.join(' | '))
   .option('--account <address>', 'the account to set; default LD_E2E_<TARGET>[_<CHAIN>]_SHOP_ACCOUNT, else LEDGERDIRECT_TESTNET_<TARGET>[_<CHAIN>]_SHOP_ADDRESS (no chain infix for XRPL)')
   .option('--quote-expiry <seconds>', 'quote validity to set', String(DEFAULT_QUOTE_EXPIRY_SECONDS))
+  .option('--try', "the plugin's try stack: put it back on the account it set up on its last start", false)
   .option('--base-url <url>', 'how the shop is reached from here (LD_E2E_<TARGET>_BASE_URL)')
   .option('--compose-dir <dir>', "PrestaShop, WooCommerce, Magento: the shop's compose folder (LD_E2E_<TARGET>_COMPOSE_DIR)")
   .option('--compose-files <files>', 'WooCommerce: comma-separated compose files (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
   .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
   .option('--container <name>', 'Shopware: docker container (LD_E2E_SHOPWARE_CONTAINER)')
-  .action(async (opts: { target: string; account?: string; quoteExpiry: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
+  .action(async (opts: { target: string; try: boolean; account?: string; quoteExpiry: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
     if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
-    const account = opts.account ?? defaultShopAccount(opts.target, chain());
+    const account = opts.account ?? (opts.try ? await tryAccountOrFail(opts.target) : defaultShopAccount(opts.target, chain()));
     const [harnessVariable, walletVariable] = shopAccountVariables(opts.target, chain());
     if (!account) {
       throw new Error(`no ${chain()} shop account known for ${opts.target}: pass --account, or set ${harnessVariable} or ${walletVariable}`);
@@ -224,6 +243,7 @@ shop
       throw new Error(`${account} is not a ${chain()} account${opts.account ? '' : ` (from ${harnessVariable} / ${walletVariable})`}; nothing written`);
     }
     const { driver } = createDriver(opts.target, {
+      try: opts.try,
       baseUrl: opts.baseUrl,
       composeDir: opts.composeDir,
       composeFiles: opts.composeFiles?.split(',').map((f) => f.trim()).filter(Boolean),
