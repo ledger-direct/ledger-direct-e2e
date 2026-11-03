@@ -22,6 +22,8 @@ export interface RunOptions {
    * shop is ready for a manual test the moment the run ends.
    */
   keepAccount?: boolean;
+  /** The account to put back after the run instead of the dev shop's own (a try shop's, read from its log). */
+  restoreAccount?: string;
   timeoutMs: number;
   version: string;
   log: (line: string) => void;
@@ -61,7 +63,7 @@ export async function runCases(options: RunOptions): Promise<Report> {
     }
     const shop: ShopConfig = { chain: ledger.chain, destinationAccount: receivingAccount, network: 'testnet', assets: ledger.assets().map((a) => a.code), quoteExpirySeconds: DEFAULT_QUOTE_EXPIRY_SECONDS };
     await options.driver.configure(shop);
-    const restoreTo = options.keepAccount ? undefined : defaultShopAccount(options.driver.name, ledger.chain);
+    const restoreTo = options.keepAccount ? undefined : (options.restoreAccount ?? defaultShopAccount(options.driver.name, ledger.chain));
 
     const results: CaseResult[] = [];
     for (const id of options.caseIds) {

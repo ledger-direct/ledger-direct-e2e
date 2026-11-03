@@ -10,6 +10,8 @@ export interface MagentoOptions {
   baseUrl: string;
   /** The compose folder of the shop (markshust layout: bin/docker-compose wrapper, phpfpm service). */
   composeDir: string;
+  /** A running compose project to address by name (`docker compose -p`) instead of the folder. */
+  composeProject?: string;
   /** The compose service with PHP and the Magento install (default: phpfpm). */
   service?: string;
   adminUser?: string;
@@ -303,7 +305,9 @@ echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transaction
   private exec(command: string[], stdin?: string): Promise<string> {
     // The markshust template wraps compose files in bin/docker-compose; a plain stack has docker compose.
     const wrapper = join(this.options.composeDir, 'bin', 'docker-compose');
-    const [bin, prefix] = existsSync(wrapper) ? [wrapper, []] : ['docker', ['compose']];
+    const [bin, prefix] = this.options.composeProject
+      ? ['docker', ['compose', '-p', this.options.composeProject]]
+      : existsSync(wrapper) ? [wrapper, []] : ['docker', ['compose']];
     const argv = [...prefix, 'exec', '-T', this.options.service ?? 'phpfpm', ...command];
     return new Promise<string>((resolve, reject) => {
       const child = spawn(bin, argv, { cwd: this.options.composeDir });
