@@ -95,6 +95,12 @@ describe('tryLogSource', () => {
     });
   });
 
+  it('passes the compose files chosen with --compose-files, as the driver does', () => {
+    expect(tryLogSource('woocommerce', { composeDir: '/x', composeFiles: ['compose.yaml', 'compose.try.yaml'] })).toEqual({
+      args: ['compose', '-f', 'compose.yaml', '-f', 'compose.try.yaml', 'logs', '--no-color', '--no-log-prefix', 'wp'], cwd: '/x',
+    });
+  });
+
   it('reads the container chosen with --container', () => {
     expect(tryLogSource('shopware', { container: 'other-shopware-1', composeDir: '/ignored' })).toEqual({ args: ['logs', 'other-shopware-1'] });
   });

@@ -70,17 +70,23 @@ export function tryAccountFromLog(log: string): string | undefined {
 /** Which try shop to read: the one the driver talks to, so a run never restores another stack's account. */
 export interface TrySelection {
   composeDir?: string;
+  /** WooCommerce: the compose files passed with -f, as the driver passes them. */
+  composeFiles?: string[];
   container?: string;
 }
 
 /**
  * Where the selected try shop's log comes from: an explicit --container, else the compose service
- * of an explicit --compose-dir, else the preset container.
+ * of the stack chosen with --compose-dir and/or --compose-files (the same `-f` files the driver
+ * uses), else the preset container.
  */
 export function tryLogSource(target: Target, selection: TrySelection = {}): { args: string[]; cwd?: string } {
   const preset = TRY_PRESETS[target];
   if (selection.container) return { args: ['logs', selection.container] };
-  if (selection.composeDir) return { args: ['compose', 'logs', '--no-color', '--no-log-prefix', preset.service], cwd: selection.composeDir };
+  const files = selection.composeFiles ?? [];
+  if (selection.composeDir || files.length > 0) {
+    return { args: ['compose', ...files.flatMap((f) => ['-f', f]), 'logs', '--no-color', '--no-log-prefix', preset.service], cwd: selection.composeDir };
+  }
   return { args: ['logs', preset.container] };
 }
 

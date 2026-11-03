@@ -215,7 +215,7 @@ program
       caseIds: resolveCaseIds(opts.cases),
       receivingAccount: opts.receivingAccount,
       keepAccount: opts.keepAccount,
-      restoreAccount: opts.try && !opts.keepAccount ? await tryAccountOrFail(opts.target, { composeDir: opts.composeDir, container: opts.container }) : undefined,
+      restoreAccount: opts.try && !opts.keepAccount ? await tryAccountOrFail(opts.target, { composeDir: opts.composeDir, composeFiles: opts.composeFiles?.split(',').map((f) => f.trim()).filter(Boolean), container: opts.container }) : undefined,
       timeoutMs: Number.parseInt(opts.timeout, 10) * 1000,
       version: program.version() ?? '0.0.0',
       log: (line) => process.stderr.write(redact(line) + '\n'),
@@ -243,7 +243,7 @@ shop
   .action(async (opts: { target: string; try: boolean; account?: string; quoteExpiry: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
     if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
     if (opts.try) assertTry(opts.target);
-    const account = opts.account ?? (opts.try ? await tryAccountOrFail(opts.target, { composeDir: opts.composeDir, container: opts.container }) : defaultShopAccount(opts.target, chain()));
+    const account = opts.account ?? (opts.try ? await tryAccountOrFail(opts.target, { composeDir: opts.composeDir, composeFiles: opts.composeFiles?.split(',').map((f) => f.trim()).filter(Boolean), container: opts.container }) : defaultShopAccount(opts.target, chain()));
     const [harnessVariable, walletVariable] = shopAccountVariables(opts.target, chain());
     if (!account) {
       throw new Error(`no ${chain()} shop account known for ${opts.target}: pass --account, or set ${harnessVariable} or ${walletVariable}`);
