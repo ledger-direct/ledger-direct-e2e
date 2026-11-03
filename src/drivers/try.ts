@@ -76,15 +76,17 @@ export interface TrySelection {
 }
 
 /**
- * Where the selected try shop's log comes from. An explicit --container wins. Otherwise the stack
- * is addressed exactly as the driver addresses it (createDriver): the same `-f` files, the same
- * folder, and the preset's project name only when no folder was chosen. One rule for both, so the
- * account can never come from another stack than the one the run talks to.
+ * Where the selected try shop's log comes from: the stack addressed exactly as createDriver
+ * addresses the driver, with the selectors that driver honours and no others, so the account can
+ * never come from another stack than the one the run talks to.
+ * - Shopware reaches one container (--container, else the preset's) and nothing through compose.
+ * - Magento, PrestaShop, WooCommerce go through compose: the chosen folder, else the preset's
+ *   project name; WooCommerce alone also takes --compose-files.
  */
 export function tryLogSource(target: Target, selection: TrySelection = {}): { args: string[]; cwd?: string } {
   const preset = TRY_PRESETS[target];
-  if (selection.container) return { args: ['logs', selection.container] };
-  const files = (selection.composeFiles ?? []).flatMap((f) => ['-f', f]);
+  if (target === 'shopware') return { args: ['logs', selection.container ?? preset.container] };
+  const files = target === 'woocommerce' ? (selection.composeFiles ?? []).flatMap((f) => ['-f', f]) : [];
   const project = selection.composeDir ? [] : ['-p', preset.composeProject];
   return { args: ['compose', ...files, ...project, 'logs', '--no-color', '--no-log-prefix', preset.service], cwd: selection.composeDir };
 }

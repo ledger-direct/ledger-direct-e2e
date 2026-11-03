@@ -107,16 +107,34 @@ describe('tryLogSource', () => {
     });
   });
 
-  it('reads the container chosen with --container', () => {
+  it('reads Shopware from its container: --container, else the preset one; a folder means nothing to it', () => {
     expect(tryLogSource('shopware', { container: 'other-shopware-1', composeDir: '/ignored' })).toEqual({ args: ['logs', 'other-shopware-1'] });
+    expect(tryLogSource('shopware', { composeDir: '/ignored', composeFiles: ['x.yaml'] })).toEqual({ args: ['logs', 'ledger-direct-try-shopware-shopware-1'] });
   });
 
-  it('matches what createDriver hands the driver for every selection', () => {
-    for (const composeDir of [undefined, '/x']) {
-      const driver = optionsOf(createDriver('woocommerce', { try: true, composeDir, composeFiles: ['c.yaml'] }).driver);
-      const args = tryLogSource('woocommerce', { composeDir, composeFiles: ['c.yaml'] }).args;
-      expect(args.includes('-p')).toBe(driver.composeProject !== undefined);
-      if (driver.composeProject) expect(args[args.indexOf('-p') + 1]).toBe(driver.composeProject);
+  it('ignores --container and --compose-files where the driver ignores them', () => {
+    const expected = { args: ['compose', '-p', 'ledger-direct-try-magento', 'logs', '--no-color', '--no-log-prefix', 'phpfpm'], cwd: undefined };
+    expect(tryLogSource('magento', { container: 'elsewhere', composeFiles: ['x.yaml'] })).toEqual(expected);
+    expect(tryLogSource('prestashop', { container: 'elsewhere', composeFiles: ['x.yaml'] }).args).not.toContain('x.yaml');
+    expect(tryLogSource('woocommerce', { container: 'elsewhere' }).args).not.toContain('elsewhere');
+  });
+
+  it('matches what createDriver hands the driver, for every target and selection', () => {
+    const selections = [{}, { composeDir: '/x' }, { composeFiles: ['c.yaml'] }, { composeDir: '/x', composeFiles: ['c.yaml'] }, { container: 'other-1' }];
+    for (const target of ['magento', 'prestashop', 'woocommerce', 'shopware'] as const) {
+      for (const selection of selections) {
+        const driver = optionsOf(createDriver(target, { try: true, ...selection }).driver);
+        const { args, cwd } = tryLogSource(target, selection);
+        if (target === 'shopware') {
+          expect(args).toEqual(['logs', driver.container]);
+          continue;
+        }
+        expect(cwd).toBe(selection.composeDir);
+        expect(args.includes('-p') ? args[args.indexOf('-p') + 1] : undefined).toBe(driver.composeProject);
+        const files = args.filter((_, i) => args[i - 1] === '-f');
+        expect(files).toEqual(target === 'woocommerce' ? (driver.composeFiles ?? []) : []);
+        expect(args).not.toContain('other-1');
+      }
     }
   });
 });
