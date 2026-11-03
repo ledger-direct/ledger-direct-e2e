@@ -1,4 +1,5 @@
 import { Client, Wallet, TrustSet, TrustSetFlags } from 'xrpl';
+import { httpFetch } from '../../http.js';
 import { ASSETS, Asset, TESTNET_FAUCET, TESTNET_ISSUED, assetFromCurrency } from './assets.js';
 
 export interface Balances {
@@ -8,17 +9,20 @@ export interface Balances {
   trustlines: Exclude<Asset, 'XRP'>[];
 }
 
+/** The faucet is slow at times; it gets more than a shop request. */
+const FAUCET_TIMEOUT_MS = 60_000;
+
 /**
  * Asks the testnet faucet for XRP. Without a destination it creates a new
  * account and returns its seed; with one it tops up an existing account. The
  * faucet rate-limits, so callers ask for what a run needs, not for stock.
  */
 export async function faucet(destination?: string): Promise<{ address: string; seed?: string; amount: number }> {
-  const response = await fetch(TESTNET_FAUCET, {
+  const response = await httpFetch(TESTNET_FAUCET, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(destination ? { destination } : {}),
-  });
+  }, FAUCET_TIMEOUT_MS);
   if (!response.ok) throw new Error(`Faucet answered ${response.status} ${response.statusText}`);
   const body = (await response.json()) as { account?: { classicAddress?: string; address?: string }; seed?: string; amount?: number; balance?: number };
   const address = body.account?.classicAddress ?? body.account?.address ?? destination;

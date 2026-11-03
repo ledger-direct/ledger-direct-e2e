@@ -1,5 +1,6 @@
 import { halfOf } from '../amounts.js';
 import { readPlatformState } from '../drivers/platform.js';
+import { httpFetch } from '../http.js';
 import { CaseContext, sleep } from './context.js';
 import { refusalLeaks } from './refusal.js';
 import type { StatusPayload } from '../drivers/driver.js';
@@ -237,7 +238,7 @@ RUNNERS['PS-10'] = async (ctx) => {
   const redirect = settled.redirect as string;
   ctx.note(`redirect: ${redirect}`);
   ctx.expect(!/finalize-transaction|_sw_payment_token=/.test(redirect), 'redirect does not lead into the expired return URL');
-  const landing = await fetch(redirect, { redirect: 'manual', headers: { Accept: 'text/html' } });
+  const landing = await httpFetch(redirect, { redirect: 'manual', headers: { Accept: 'text/html' } });
   ctx.expect(landing.status < 400, `the redirect target answers ${landing.status}, not an error page`);
   const evidence = await platformState(ctx, order);
   ctx.expect(evidence.paid === true, 'order is in the paid state');

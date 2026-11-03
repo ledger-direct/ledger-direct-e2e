@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
 
 export interface MagentoOptions {
@@ -123,7 +124,7 @@ echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.ass
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
-    const response = await fetch(this.pageUrl(order), { redirect: 'manual' });
+    const response = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
     if (response.status !== 200) throw new Error(`Magento: payment page answered ${response.status}`);
     const html = await response.text();
     const page = readPaymentPage(html);
@@ -132,13 +133,13 @@ echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.ass
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {
-    const response = await fetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
+    const response = await httpFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`Magento: status endpoint answered ${response.status}`);
     return (await response.json()) as StatusPayload;
   }
 
   async statusResponse(order: PlacedOrder): Promise<{ status: number; body: string }> {
-    const response = await fetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
+    const response = await httpFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
     return { status: response.status, body: await response.text() };
   }
 
@@ -147,7 +148,7 @@ echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.ass
   }
 
   async pageResponse(order: PlacedOrder): Promise<{ status: number }> {
-    const response = await fetch(this.pageUrl(order), { redirect: 'manual' });
+    const response = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
     return { status: response.status };
   }
 
@@ -156,12 +157,12 @@ echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.ass
    * Magento rendered, from the session that rendered it — so the page's cookies travel along.
    */
   async refresh(order: PlacedOrder): Promise<void> {
-    const page = await fetch(this.pageUrl(order), { redirect: 'manual' });
+    const page = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
     const html = await page.text();
     const formKey = html.match(/name="form_key" value="([^"]+)"/)?.[1];
     if (!formKey) throw new Error(`Magento: the payment page for order ${order.id} shows no form key`);
     const cookies = page.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
-    const response = await fetch(`${this.options.baseUrl}/ledger-direct/payment/refresh`, {
+    const response = await httpFetch(`${this.options.baseUrl}/ledger-direct/payment/refresh`, {
       method: 'POST',
       headers: cookies ? { Cookie: cookies } : {},
       body: new URLSearchParams({ form_key: formKey, id: order.id, key: order.secret }),
@@ -257,7 +258,7 @@ echo json_encode([
   private async ensureTestProduct(): Promise<string> {
     if (this.testProductSku) return this.testProductSku;
     const sku = this.options.testProductSku ?? 'LD-E2E-001';
-    const existing = await fetch(`${this.options.baseUrl}/rest/V1/products/${encodeURIComponent(sku)}`, { headers: { Authorization: `Bearer ${await this.token()}` } });
+    const existing = await httpFetch(`${this.options.baseUrl}/rest/V1/products/${encodeURIComponent(sku)}`, { headers: { Authorization: `Bearer ${await this.token()}` } });
     if (existing.status !== 200) {
       await this.admin('POST', '/rest/V1/products', {
         product: {
@@ -330,7 +331,7 @@ echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transaction
   private async request(method: string, path: string, body?: unknown, token?: string): Promise<unknown> {
     const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const response = await fetch(`${this.options.baseUrl}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await httpFetch(`${this.options.baseUrl}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await response.text();
     if (!response.ok) throw new Error(`Magento REST ${method} ${path} answered ${response.status}: ${text.slice(0, 300)}`);
     return text ? JSON.parse(text) : null;
@@ -338,7 +339,7 @@ echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transaction
 
   private async token(): Promise<string> {
     if (this.adminToken) return this.adminToken;
-    const response = await fetch(`${this.options.baseUrl}/rest/V1/integration/admin/token`, {
+    const response = await httpFetch(`${this.options.baseUrl}/rest/V1/integration/admin/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: this.options.adminUser ?? 'john.smith', password: this.options.adminPassword ?? 'password123' }),
