@@ -1,6 +1,7 @@
 import { halfOf } from '../amounts.js';
 import { readPlatformState } from '../drivers/platform.js';
 import { CaseContext, sleep } from './context.js';
+import { refusalLeaks } from './refusal.js';
 import type { StatusPayload } from '../drivers/driver.js';
 
 export type CaseRunner = (ctx: CaseContext) => Promise<void>;
@@ -144,7 +145,8 @@ RUNNERS['PS-07'] = async (ctx) => {
   const forged = { ...order, secret: ctx.driver.wrongSecret?.() ?? 'not-the-key' };
   const status = await ctx.driver.statusResponse(forged);
   ctx.expect(status.status === 403, `wrong key is refused with 403 (got ${status.status})`);
-  ctx.expect(!status.body.includes(order.reference) && !status.body.includes('amount') && !status.body.includes('state'), 'refusal carries no order data');
+  const leaks = refusalLeaks(status.body, order.reference);
+  ctx.expect(leaks.length === 0, `refusal carries no order data${leaks.length > 0 ? ` (found ${leaks.join(', ')})` : ''}`);
   const missing = await ctx.driver.statusResponse({ ...order, id: ctx.driver.unknownOrderId() });
   ctx.expect(missing.status === status.status && sameRefusal(missing.body, status.body), 'an unknown order is refused exactly like a wrong key');
   const page = await ctx.driver.pageResponse(forged);
