@@ -1,0 +1,49 @@
+name: CI
+
+# The harness's own checks on every pull request and every push to main: type check, the unit tests
+# (offline, no testnet, no secrets) and the build. The plugin repositories' e2e workflows check out
+# main of this repository and build it, so main must always build.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Nothing here writes to GitHub.
+permissions:
+  contents: read
+
+# A newer push to the same pull request cancels its run in progress. Every other run gets a group of
+# its own: GitHub keeps only one pending run per group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    name: Type check, tests and build (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
