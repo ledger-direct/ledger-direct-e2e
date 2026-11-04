@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ensureTreasury, type EnsureDeps, type Stablecoin, type TreasuryState } from '../src/chains/xrpl/ensure.js';
+import { ensureTreasury, isAccountNotFound, type EnsureDeps, type Stablecoin, type TreasuryState } from '../src/chains/xrpl/ensure.js';
 
 const minimums = { xrp: 50, tokens: { RLUSD: 10, USDC: 10 } as Partial<Record<Stablecoin, number>> };
 
@@ -66,6 +66,18 @@ describe('ensureTreasury', () => {
     const { deps, calls } = treasury({ xrp: 1.7, tokens: { RLUSD: 20, USDC: 20 } }, { faucet: 0 });
     await expect(ensureTreasury(minimums, deps)).rejects.toThrow('XRP 1.7 < 50');
     expect(calls.fund).toBe(3);
+  });
+
+  it('starts from nothing on a reset testnet: a missing account reads as empty, the faucet creates it', async () => {
+    expect(isAccountNotFound(Object.assign(new Error('Account not found.'), { data: { error: 'actNotFound' } }))).toBe(true);
+    expect(isAccountNotFound(Object.assign(new Error('timeout'), { data: { error: 'timeout' } }))).toBe(false);
+    expect(isAccountNotFound(new Error('plain'))).toBe(false);
+    expect(isAccountNotFound(null)).toBe(false);
+    const { deps, calls } = treasury({ xrp: 0, tokens: {} });
+    const result = await ensureTreasury(minimums, deps);
+    expect(calls.fund).toBe(1);
+    expect(calls.buy).toEqual(['10.00 RLUSD', '10.00 USDC']);
+    expect(result.after.xrp).toBe(100);
   });
 
   it('fails when the DEX book cannot fill the purchase', async () => {

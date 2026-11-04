@@ -7,7 +7,7 @@ import { CHAINS, isAccountOf, isChain, ledgerFor, treasurySeedVariable } from '.
 import { isAsset } from './chains/xrpl/assets.js';
 import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
-import { ensureTreasury, type Stablecoin } from './chains/xrpl/ensure.js';
+import { ensureTreasury, isAccountNotFound, type Stablecoin } from './chains/xrpl/ensure.js';
 import { balances as xrplBalances, faucet } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
@@ -128,8 +128,14 @@ wallet
     const result = await withClient((c) =>
       ensureTreasury(minimums, {
         read: async () => {
-          const b = await xrplBalances(c, w.classicAddress);
-          return { xrp: Number(b.xrp), tokens: { RLUSD: Number(b.tokens.RLUSD ?? 0), USDC: Number(b.tokens.USDC ?? 0) } };
+          try {
+            const b = await xrplBalances(c, w.classicAddress);
+            return { xrp: Number(b.xrp), tokens: { RLUSD: Number(b.tokens.RLUSD ?? 0), USDC: Number(b.tokens.USDC ?? 0) } };
+          } catch (error) {
+            // A reset testnet no longer knows the treasury; the faucet creates it again.
+            if (isAccountNotFound(error)) return { xrp: 0, tokens: { RLUSD: 0, USDC: 0 } };
+            throw error;
+          }
         },
         fund: async () => void (await faucet(w.classicAddress)),
         buy: async (coin: Stablecoin, amount: string) => (await buy(c, w, coin, amount, opts.maxXrp)).result,

@@ -85,6 +85,15 @@ export async function ensureTreasury(minimums: Minimums, deps: EnsureDeps): Prom
   return { before, after: state, actions };
 }
 
+/**
+ * Whether a ledger request failed because the account does not exist: after a testnet
+ * reset the treasury is gone until the faucet creates it again, so `ensure` reads it as
+ * empty instead of failing before it can ask the faucet.
+ */
+export function isAccountNotFound(error: unknown): boolean {
+  return (error as { data?: { error?: string } } | null)?.data?.error === 'actNotFound';
+}
+
 export function shortfalls(minimums: Minimums, state: TreasuryState): string[] {
   const short: string[] = [];
   if (state.xrp < minimums.xrp) short.push(`XRP ${state.xrp} < ${minimums.xrp}`);
