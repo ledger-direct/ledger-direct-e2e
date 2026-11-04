@@ -35,9 +35,9 @@ type Found = { fields: Set<string>; markup: boolean };
  * `details` included); any other text by the contract's markers (`"state":`,
  * whitespace before the colon allowed) and `data-ld-` markup, and once more
  * after decoding its HTML entities, so an HTML page carrying the contract as
- * `{&quot;state&quot;:…}` is read like the plain one (twice encoded included).
+ * `{&quot;state&quot;:…}` is read like the plain one (up to MAX_DECODINGS layers).
  */
-function scanText(text: string, found: Found): void {
+function scanText(text: string, found: Found, decodings = 0): void {
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -45,27 +45,31 @@ function scanText(text: string, found: Found): void {
     parsed = undefined;
   }
   if (parsed !== undefined && parsed !== text) {
-    walk(parsed, found);
+    walk(parsed, found, decodings);
     return;
   }
   for (const field of CONTRACT_FIELDS) {
     if (new RegExp(`"${field}"\\s*:`).test(text)) found.fields.add(field);
   }
   if (text.includes('data-ld-')) found.markup = true;
+  if (decodings >= MAX_DECODINGS) return;
   const decoded = decodeEntities(text);
-  if (decoded !== text) scanText(decoded, found);
+  if (decoded !== text) scanText(decoded, found, decodings + 1);
 }
 
+/** Layers of entity encoding read per text; a page encodes once, rarely twice. Bounds the work for `&amp;amp;amp;…`. */
+const MAX_DECODINGS = 4;
+
 /** Every key at any depth; every string value goes through the same rule as the body. */
-function walk(value: unknown, found: Found): void {
+function walk(value: unknown, found: Found, decodings: number): void {
   if (typeof value === 'string') {
-    scanText(value, found);
+    scanText(value, found, decodings);
   } else if (Array.isArray(value)) {
-    for (const item of value) walk(item, found);
+    for (const item of value) walk(item, found, decodings);
   } else if (value !== null && typeof value === 'object') {
     for (const [key, item] of Object.entries(value)) {
       if ((CONTRACT_FIELDS as readonly string[]).includes(key)) found.fields.add(key);
-      walk(item, found);
+      walk(item, found, decodings);
     }
   }
 }
@@ -82,7 +86,7 @@ const LEGACY_ENTITIES: Record<string, string> = { quot: '"', amp: '&', lt: '<', 
  * becomes `&quot;`, which the next scan decodes in turn.
  */
 function decodeEntities(text: string): string {
-  return text.replace(/&(?:#(\d{1,7});?|#[xX]([0-9a-fA-F]{1,6});?|([A-Za-z]+);|(quot|amp|lt|gt))/gi, (match: string, dec?: string, hex?: string, named?: string, legacy?: string) => {
+  return text.replace(/&(?:#(\d+);?|#[xX]([0-9a-fA-F]+);?|([A-Za-z]+);|(quot|amp|lt|gt))/gi, (match: string, dec?: string, hex?: string, named?: string, legacy?: string) => {
     if (dec !== undefined || hex !== undefined) {
       const code = dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex as string, 16);
       return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;

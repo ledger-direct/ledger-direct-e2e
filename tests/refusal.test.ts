@@ -68,10 +68,23 @@ describe('refusalLeaks (PS-07)', () => {
     expect(refusalLeaks('<pre>{&amp;#34;amount_requested&amp;#x22;:1}</pre>', REF)).toEqual(['field amount_requested']);
     expect(refusalLeaks(JSON.stringify({ error: 'forbidden', html: '<div data-x="{&quot;schema_version&quot;:1}"></div>' }), REF)).toEqual(['field schema_version']);
     expect(refusalLeaks(JSON.stringify({ error: 'forbidden', details: '{&quot;state&quot;:&quot;waiting&quot;}' }), REF)).toEqual(['field state']);
+    expect(refusalLeaks('<pre>{&amp;amp;amp;quot;hash&amp;amp;amp;quot;:1}</pre>', REF)).toEqual(['field hash']);
+  });
+
+  it('decodes numeric references with leading zeroes (#18)', () => {
+    expect(refusalLeaks('<p>{&#000000034;state&#000000034;:1}</p>', REF)).toEqual(['field state']);
+    expect(refusalLeaks('<p>{&#x0000000022;amount_paid&#x0000000022;:1}</p>', REF)).toEqual(['field amount_paid']);
+  });
+
+  it('bounds the work for deeply encoded text (#18)', () => {
+    const deep = '&' + 'amp;'.repeat(200_000) + 'quot;state' + '&quot;:1';
+    expect(() => refusalLeaks(deep, REF)).not.toThrow();
+    expect(refusalLeaks(JSON.stringify({ error: 'forbidden', html: deep }), REF)).toEqual([]);
   });
 
   it('accepts an entity-encoded HTML page that only mentions contract words (#18)', () => {
     expect(refusalLeaks('<p>&quot;state&quot; unknown &amp; amount_paid not shown &#8212; 403</p>', REF)).toEqual([]);
     expect(refusalLeaks('<p>&unknown; &#0; &#x110000; &#99999999; &amp</p>', REF)).toEqual([]);
+    expect(refusalLeaks(`<p>&#${'9'.repeat(400)}; &#x${'f'.repeat(400)};</p>`, REF)).toEqual([]);
   });
 });
