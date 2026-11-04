@@ -52,12 +52,36 @@ export async function runCases(options: RunOptions): Promise<Report> {
 
   const payerSeed = requireSeed(treasurySeedVariable(ledger.chain));
 
+  // The run's own throwaway account, once created: swept back to the treasury at the end.
+  let runSeed: string | undefined;
+  let swept = false;
+  /**
+   * Everything the throwaway account holds goes back to the treasury: the faucet's
+   * 100 XRP and every payment the shop received. Not when the account stays configured
+   * in the shop (--keep-account), and never at the cost of the run: a failed sweep is
+   * logged, the report stands.
+   */
+  const sweepBack = async (report?: Report): Promise<void> => {
+    swept = true;
+    if (!runSeed || options.keepAccount || !ledger.sweep) return;
+    try {
+      const back = await ledger.sweep(runSeed, ledger.addressOf(payerSeed));
+      const tokens = Object.entries(back.tokens).map(([code, amount]) => `, ${amount} ${code}`).join('');
+      options.log(`returned to the treasury: ${back.native} ${ledger.nativeAsset}${tokens}`);
+      for (const failure of back.failed) options.log(`returning the run account's funds to the treasury, in part failed: ${failure}`);
+      if (report) report.returned = { native: back.native, tokens: back.tokens };
+    } catch (error) {
+      options.log(`returning the run account's funds to the treasury failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  };
+
   try {
     let receivingAccount = options.receivingAccount;
     if (!receivingAccount) {
       // A fresh receiving account per run — two runs must never share an identifier space —
       // with trust lines to the issued assets, so the stablecoin cases can receive.
       const fresh = await ledger.createFresh({ trustlines: true });
+      runSeed = fresh.seed;
       receivingAccount = fresh.address;
       options.log(`receiving account for this run (${ledger.chain}): ${receivingAccount}`);
     }
@@ -112,16 +136,22 @@ export async function runCases(options: RunOptions): Promise<Report> {
       }
     }
 
+    // After the restore: the shop no longer points at the throwaway account.
+    await sweepBack(report);
     return report;
   } finally {
+    // A run that broke off before its report (configure failed, say) still gives the money back.
+    if (!swept) await sweepBack();
     await ledger.close();
   }
 }
 
 /**
- * The three named sets, besides a comma-separated list of ids:
+ * The four named sets, besides a comma-separated list of ids:
  * - `automated`: every case with a runner that is not nightly-only — what a
  *   developer runs against a dev shop, in minutes;
+ * - `testnet`: every case with a runner but the long waits — `automated` plus
+ *   PS-04, for runs on the public testnet that should stay short (a version tag);
  * - `nightly`: every case with a runner, the nightly-only ones included (PS-04
  *   needs the public testnet's issuers, PS-10 waits 35 minutes);
  * - `all`: the whole catalogue, cases without a runner recorded as skipped.
@@ -130,5 +160,6 @@ export function resolveCaseIds(spec: string): string[] {
   if (spec === 'all') return CASES.map((c) => c.id);
   if (spec === 'nightly') return Object.keys(RUNNERS);
   if (spec === 'automated') return Object.keys(RUNNERS).filter((id) => !findCase(id)?.nightlyOnly);
+  if (spec === 'testnet') return Object.keys(RUNNERS).filter((id) => !findCase(id)?.longWait);
   return spec.split(',').map((s) => s.trim().toUpperCase()).filter(Boolean);
 }

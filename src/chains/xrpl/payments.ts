@@ -1,5 +1,6 @@
 import { Client, Payment, PaymentFlags, Wallet, xrpToDrops, dropsToXrp } from 'xrpl';
 import { Asset, TESTNET_EXPLORER_TX, TESTNET_ISSUED } from './assets.js';
+import { submitWithRetry } from './submit.js';
 
 export interface PaymentRequest {
   seed: string;
@@ -48,8 +49,7 @@ export async function pay(client: Client, request: PaymentRequest): Promise<Paym
     }
   }
 
-  const prepared = await client.autofill(tx);
-  const response = await client.submitAndWait(wallet.sign(prepared).tx_blob);
+  const response = await submitWithRetry(client, wallet, tx);
   const meta = response.result.meta;
   const metaObject = typeof meta === 'object' && meta !== null ? (meta as { TransactionResult?: string; delivered_amount?: unknown }) : {};
 

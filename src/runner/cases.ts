@@ -158,12 +158,15 @@ RUNNERS['PS-07'] = async (ctx) => {
 RUNNERS['PS-09'] = async (ctx) => {
   const { order, page } = await ctx.placeOrder(ctx.ledger.nativeAsset);
   await ctx.pay(page, page.amountDisplayed);
-  // Nobody polls: the customer closed the page. Only the safety net can settle this order.
+  // Nobody polls: the customer closed the page. Only the safety net can settle this order:
+  // this call, or the shop's own scheduler running the same job first (a try shop runs it
+  // every minute). Either way the order must end up paid below; who settled it does not
+  // matter, so `settled` is noted, not required.
   const answer = (await ctx.driver.safetyNet()) as { synced?: boolean; checked?: number; settled?: number } | undefined;
   ctx.note(`safety net answered ${JSON.stringify(answer ?? null)}`);
   if (answer && 'synced' in answer) {
     ctx.expect(answer.synced === true, 'safety net synced the ledger');
-    ctx.expect((answer.settled ?? 0) >= 1, 'safety net settled at least this order');
+    if ((answer.settled ?? 0) === 0) ctx.note('the call settled nothing: the shop\'s own scheduler was first');
   }
   const seen = await platformState(ctx, order);
   ctx.expect(seen.paid === true && seen.hashMatches, 'order is paid with the transaction hash, without a poll');

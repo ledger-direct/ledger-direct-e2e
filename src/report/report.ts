@@ -26,6 +26,8 @@ export interface Report {
   results: CaseResult[];
   /** What the process had paid when the run ended, per asset, and its limits (chains/spend.ts). */
   spending?: { spent: Record<string, string>; maxPayment: string; budget?: Record<string, string> };
+  /** What the run's throwaway receiving account sent back to the treasury afterwards. */
+  returned?: { native: string; tokens: Record<string, string> };
 }
 
 export async function writeReport(report: Report, path: string): Promise<void> {

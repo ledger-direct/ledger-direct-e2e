@@ -1,8 +1,9 @@
 import { Client, Wallet } from 'xrpl';
-import type { Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult } from '../chain.js';
+import type { Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from '../chain.js';
 import { ASSETS, TESTNET_EXPLORER_TX, TESTNET_ISSUED, TESTNET_WS, isAsset } from './assets.js';
 import { parseXrplIncoming } from './incoming.js';
 import { pay } from './payments.js';
+import { sweep } from './sweep.js';
 import { balances, createFresh, faucet } from './wallets.js';
 
 /** The XRP Ledger testnet behind the chain contract. */
@@ -72,6 +73,10 @@ export class XrplLedger implements Ledger {
       asset: request.asset,
       partial: request.partial,
     });
+  }
+
+  async sweep(seed: string, to: string): Promise<SweepResult> {
+    return sweep(await this.connect(), seed, to);
   }
 
   async incoming(address: string, options: { identifier?: string; limit?: number } = {}): Promise<IncomingPayment[]> {

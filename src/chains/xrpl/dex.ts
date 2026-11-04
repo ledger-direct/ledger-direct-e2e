@@ -1,5 +1,6 @@
 import { Client, OfferCreate, OfferCreateFlags, Wallet, xrpToDrops, dropsToXrp } from 'xrpl';
 import { Asset, TESTNET_ISSUED } from './assets.js';
+import { submitWithRetry } from './submit.js';
 
 export interface Offer {
   gives: string;
@@ -36,8 +37,7 @@ export async function buy(client: Client, wallet: Wallet, asset: Exclude<Asset, 
     TakerPays: { currency: issued.currency, issuer: issued.issuer, value },
     Flags: OfferCreateFlags.tfImmediateOrCancel,
   };
-  const prepared = await client.autofill(tx);
-  const response = await client.submitAndWait(wallet.sign(prepared).tx_blob);
+  const response = await submitWithRetry(client, wallet, tx);
   const meta = response.result.meta;
   return {
     hash: response.result.hash,

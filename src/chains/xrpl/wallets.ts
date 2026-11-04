@@ -1,6 +1,7 @@
 import { Client, Wallet, TrustSet, TrustSetFlags } from 'xrpl';
 import { httpFetch } from '../../http.js';
 import { ASSETS, Asset, TESTNET_FAUCET, TESTNET_ISSUED, assetFromCurrency } from './assets.js';
+import { submitWithRetry } from './submit.js';
 
 export interface Balances {
   address: string;
@@ -45,8 +46,7 @@ export async function setTrustlines(client: Client, wallet: Wallet, assets: Excl
       LimitAmount: { currency: issued.currency, issuer: issued.issuer, value: limit },
       Flags: TrustSetFlags.tfSetNoRipple,
     };
-    const prepared = await client.autofill(tx);
-    const result = await client.submitAndWait(wallet.sign(prepared).tx_blob);
+    const result = await submitWithRetry(client, wallet, tx);
     const meta = result.result.meta;
     results[asset] = typeof meta === 'object' && meta !== null && 'TransactionResult' in meta ? String(meta.TransactionResult) : 'unknown';
   }
