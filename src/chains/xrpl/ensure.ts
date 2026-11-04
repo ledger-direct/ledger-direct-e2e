@@ -24,7 +24,11 @@ export interface EnsureDeps {
   read(): Promise<TreasuryState>;
   /** One faucet request to the treasury. */
   fund(): Promise<void>;
-  /** Buys `amount` of the coin on the DEX, spending at most the configured XRP. */
+  /**
+   * Buys `amount` of the coin on the DEX, spending at most the configured XRP. Sets the
+   * treasury's trust line first: a line an offer creates has limit 0, and the treasury
+   * could then not receive the coin back from a run's sweep.
+   */
   buy(coin: Stablecoin, amount: string): Promise<string>;
   /** Waits briefly; a faucet answers before its payment is validated. */
   pause(ms: number): Promise<void>;

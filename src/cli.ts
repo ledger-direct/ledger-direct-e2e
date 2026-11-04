@@ -8,7 +8,7 @@ import { isAsset } from './chains/xrpl/assets.js';
 import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { ensureTreasury, isAccountNotFound, type Stablecoin } from './chains/xrpl/ensure.js';
-import { balances as xrplBalances, faucet } from './chains/xrpl/wallets.js';
+import { balances as xrplBalances, faucet, setTrustlines } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
 import { TRY_PRESETS, tryShopAccount, type TrySelection } from './drivers/try.js';
@@ -138,7 +138,12 @@ wallet
           }
         },
         fund: async () => void (await faucet(w.classicAddress)),
-        buy: async (coin: Stablecoin, amount: string) => (await buy(c, w, coin, amount, opts.maxXrp)).result,
+        buy: async (coin: Stablecoin, amount: string) => {
+          // A filled offer would create a missing line with limit 0 (after a testnet reset), and
+          // the sweeps of later runs could then not pay the coin back. TrustSet is idempotent.
+          await setTrustlines(c, w, [coin]);
+          return (await buy(c, w, coin, amount, opts.maxXrp)).result;
+        },
         pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         log: (line) => process.stderr.write(line + '\n'),
       }),
