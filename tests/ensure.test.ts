@@ -4,11 +4,17 @@ import { ensureTreasury, isAccountNotFound, type EnsureDeps, type Stablecoin, ty
 const minimums = { xrp: 50, tokens: { RLUSD: 10, USDC: 10 } as Partial<Record<Stablecoin, number>> };
 
 /** A treasury whose balances the faucet and the DEX change, as configured per test. */
-function treasury(start: TreasuryState, effects: { faucet?: number; fills?: Partial<Record<Stablecoin, number>>; xrpPerBuy?: number } = {}) {
+function treasury(start: TreasuryState, effects: { faucet?: number; fills?: Partial<Record<Stablecoin, number>>; xrpPerBuy?: number; limits?: Partial<Record<Stablecoin, string>> } = {}) {
   let state: TreasuryState = { xrp: start.xrp, tokens: { ...start.tokens } };
-  const calls = { fund: 0, buy: [] as string[] };
+  const limits: Partial<Record<Stablecoin, string>> = { ...(effects.limits ?? { RLUSD: '1000000', USDC: '1000000' }) };
+  const calls = { fund: 0, buy: [] as string[], lines: [] as string[] };
   const deps: EnsureDeps = {
     read: async () => ({ xrp: state.xrp, tokens: { ...state.tokens } }),
+    lineLimits: async () => ({ ...limits }),
+    setLine: async (coin) => {
+      calls.lines.push(coin);
+      limits[coin] = '1000000';
+    },
     fund: async () => {
       calls.fund += 1;
       state = { ...state, xrp: state.xrp + (effects.faucet ?? 100) };
@@ -30,7 +36,7 @@ describe('ensureTreasury', () => {
     const { deps, calls } = treasury({ xrp: 200, tokens: { RLUSD: 880, USDC: 10.5 } });
     const result = await ensureTreasury(minimums, deps);
     expect(result.actions).toEqual([]);
-    expect(calls).toEqual({ fund: 0, buy: [] });
+    expect(calls).toEqual({ fund: 0, buy: [], lines: [] });
   });
 
   it('asks the faucet until XRP is above the minimum', async () => {
@@ -78,6 +84,22 @@ describe('ensureTreasury', () => {
     expect(calls.fund).toBe(1);
     expect(calls.buy).toEqual(['10.00 RLUSD', '10.00 USDC']);
     expect(result.after.xrp).toBe(100);
+  });
+
+  it('repairs a missing or zero-limit trust line even when no purchase is needed', async () => {
+    const { deps, calls } = treasury({ xrp: 200, tokens: { RLUSD: 880, USDC: 20 } }, { limits: { RLUSD: '0' } });
+    const result = await ensureTreasury(minimums, deps);
+    expect(calls.lines).toEqual(['RLUSD', 'USDC']);
+    expect(calls.buy).toEqual([]);
+    expect(result.actions).toEqual(['trust line RLUSD', 'trust line USDC']);
+  });
+
+  it('sets the lines before it buys', async () => {
+    const order: string[] = [];
+    const { deps } = treasury({ xrp: 100, tokens: {} }, { limits: {} });
+    const wrapped: EnsureDeps = { ...deps, setLine: async (c) => { order.push(`line ${c}`); await deps.setLine(c); }, buy: async (c, a) => { order.push(`buy ${c}`); return deps.buy(c, a); } };
+    await ensureTreasury(minimums, wrapped);
+    expect(order).toEqual(['line RLUSD', 'line USDC', 'buy RLUSD', 'buy USDC']);
   });
 
   it('fails when the DEX book cannot fill the purchase', async () => {

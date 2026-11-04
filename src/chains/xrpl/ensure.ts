@@ -7,6 +7,11 @@
  * the faucet (about 100 per request), the stablecoins from the testnet DEX like
  * `wallet top-up`. A treasury that cannot be brought up fails here, with the
  * shortfall named, instead of a payment failing mid-run with tecUNFUNDED_PAYMENT.
+ *
+ * The treasury's trust lines are checked first, whatever the balances: a line that is
+ * missing or has limit 0 (one a filled DEX offer created, after a testnet reset or an
+ * old `wallet top-up`) is set to a real limit, or the sweeps of later runs could not
+ * pay the coin back.
  */
 export type Stablecoin = 'RLUSD' | 'USDC';
 
@@ -22,13 +27,13 @@ export interface TreasuryState {
 
 export interface EnsureDeps {
   read(): Promise<TreasuryState>;
+  /** The limit of the treasury's line per coin, as the ledger states it; absent when there is no line. */
+  lineLimits(): Promise<Partial<Record<Stablecoin, string>>>;
+  /** Sets the treasury's line for the coin to a real limit (TrustSet, idempotent). */
+  setLine(coin: Stablecoin): Promise<void>;
   /** One faucet request to the treasury. */
   fund(): Promise<void>;
-  /**
-   * Buys `amount` of the coin on the DEX, spending at most the configured XRP. Sets the
-   * treasury's trust line first: a line an offer creates has limit 0, and the treasury
-   * could then not receive the coin back from a run's sweep.
-   */
+  /** Buys `amount` of the coin on the DEX, spending at most the configured XRP. */
   buy(coin: Stablecoin, amount: string): Promise<string>;
   /** Waits briefly; a faucet answers before its payment is validated. */
   pause(ms: number): Promise<void>;
@@ -63,8 +68,17 @@ export async function ensureTreasury(minimums: Minimums, deps: EnsureDeps): Prom
     }
   };
 
-  // XRP first: the purchases below pay with it.
+  // XRP first: the line repairs and the purchases below pay with it.
   await topUpXrp();
+
+  const limits = await deps.lineLimits();
+  for (const coin of Object.keys(minimums.tokens) as Stablecoin[]) {
+    const limit = limits[coin];
+    if (limit !== undefined && Number(limit) > 0) continue;
+    deps.log(`${coin} trust line ${limit === undefined ? 'missing' : 'has limit 0'}: setting it`);
+    await deps.setLine(coin);
+    actions.push(`trust line ${coin}`);
+  }
 
   let bought = false;
   for (const coin of Object.keys(minimums.tokens) as Stablecoin[]) {

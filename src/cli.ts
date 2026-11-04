@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import { Wallet } from 'xrpl';
 import { CASES, findCase } from './cases/catalogue.js';
 import { CHAINS, isAccountOf, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
-import { isAsset } from './chains/xrpl/assets.js';
+import { TESTNET_ISSUED, assetFromCurrency, isAsset } from './chains/xrpl/assets.js';
 import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { ensureTreasury, isAccountNotFound, type Stablecoin } from './chains/xrpl/ensure.js';
@@ -102,6 +102,10 @@ wallet
     const w = Wallet.fromSeed(requireSeed(opts.seedEnv));
     const results = await withClient(async (c) => {
       const r: Record<string, unknown> = {};
+      // A real limit first: a line a filled offer creates has limit 0, and a run's sweep
+      // could then not pay the coin back to the treasury. TrustSet is idempotent.
+      const coins = [...(opts.rlusd ? ['RLUSD' as const] : []), ...(opts.usdc ? ['USDC' as const] : [])];
+      if (coins.length > 0) await setTrustlines(c, w, coins);
       if (opts.rlusd) r.RLUSD = await buy(c, w, 'RLUSD', opts.rlusd, opts.maxXrp);
       if (opts.usdc) r.USDC = await buy(c, w, 'USDC', opts.usdc, opts.maxXrp);
       r.balances = await xrplBalances(c, w.classicAddress);
@@ -138,12 +142,22 @@ wallet
           }
         },
         fund: async () => void (await faucet(w.classicAddress)),
-        buy: async (coin: Stablecoin, amount: string) => {
-          // A filled offer would create a missing line with limit 0 (after a testnet reset), and
-          // the sweeps of later runs could then not pay the coin back. TrustSet is idempotent.
-          await setTrustlines(c, w, [coin]);
-          return (await buy(c, w, coin, amount, opts.maxXrp)).result;
+        lineLimits: async () => {
+          try {
+            const lines = await c.request({ command: 'account_lines', account: w.classicAddress, ledger_index: 'validated' });
+            const limits: Partial<Record<Stablecoin, string>> = {};
+            for (const line of lines.result.lines) {
+              const asset = assetFromCurrency(line.currency);
+              if ((asset === 'RLUSD' || asset === 'USDC') && TESTNET_ISSUED[asset].issuer === line.account) limits[asset] = line.limit;
+            }
+            return limits;
+          } catch (error) {
+            if (isAccountNotFound(error)) return {};
+            throw error;
+          }
         },
+        setLine: async (coin: Stablecoin) => void (await setTrustlines(c, w, [coin])),
+        buy: async (coin: Stablecoin, amount: string) => (await buy(c, w, coin, amount, opts.maxXrp)).result,
         pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         log: (line) => process.stderr.write(line + '\n'),
       }),
