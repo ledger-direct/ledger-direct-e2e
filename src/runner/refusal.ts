@@ -33,7 +33,9 @@ type Found = { fields: Set<string>; markup: boolean };
  * One rule for every text: the body itself and every string value inside it.
  * Text that parses as JSON is read as JSON (a stringified refusal inside
  * `details` included); any other text by the contract's markers (`"state":`,
- * whitespace before the colon allowed) and `data-ld-` markup.
+ * whitespace before the colon allowed) and `data-ld-` markup, and once more
+ * after decoding its HTML entities, so an HTML page carrying the contract as
+ * `{&quot;state&quot;:…}` is read like the plain one (twice encoded included).
  */
 function scanText(text: string, found: Found): void {
   let parsed: unknown;
@@ -50,6 +52,8 @@ function scanText(text: string, found: Found): void {
     if (new RegExp(`"${field}"\\s*:`).test(text)) found.fields.add(field);
   }
   if (text.includes('data-ld-')) found.markup = true;
+  const decoded = decodeEntities(text);
+  if (decoded !== text) scanText(decoded, found);
 }
 
 /** Every key at any depth; every string value goes through the same rule as the body. */
@@ -64,4 +68,32 @@ function walk(value: unknown, found: Found): void {
       walk(item, found);
     }
   }
+}
+
+/** The named entities an HTML page may write a marker with. */
+const NAMED_ENTITIES: Record<string, string> = { quot: '"', amp: '&', lt: '<', gt: '>', apos: "'", colon: ':', hyphen: '-', dash: '-' };
+/** HTML also reads these four in capitals and without `;` (`&QUOT`, `&quotstate`). */
+const LEGACY_ENTITIES: Record<string, string> = { quot: '"', amp: '&', lt: '<', gt: '>' };
+
+/**
+ * One pass of HTML entity decoding as a browser reads it: decimal (`&#34;`) and
+ * hexadecimal (`&#x22;`) with or without `;`, named ones with `;` (`&quot;`),
+ * the legacy four also in capitals and without `;`. One pass only: `&amp;quot;`
+ * becomes `&quot;`, which the next scan decodes in turn.
+ */
+function decodeEntities(text: string): string {
+  return text.replace(/&(?:#(\d{1,7});?|#[xX]([0-9a-fA-F]{1,6});?|([A-Za-z]+);|(quot|amp|lt|gt))/gi, (match: string, dec?: string, hex?: string, named?: string, legacy?: string) => {
+    if (dec !== undefined || hex !== undefined) {
+      const code = dec !== undefined ? Number.parseInt(dec, 10) : Number.parseInt(hex as string, 16);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : match;
+    }
+    if (named !== undefined) {
+      const known = NAMED_ENTITIES[named] ?? LEGACY_ENTITIES[named.toLowerCase()];
+      if (known !== undefined) return known;
+      // `&quotstate;` is no entity, but a browser still reads its legacy prefix
+      const prefix = Object.keys(LEGACY_ENTITIES).find((key) => named.toLowerCase().startsWith(key));
+      return prefix === undefined ? match : LEGACY_ENTITIES[prefix] + match.slice(1 + prefix.length);
+    }
+    return LEGACY_ENTITIES[(legacy as string).toLowerCase()] ?? match;
+  });
 }

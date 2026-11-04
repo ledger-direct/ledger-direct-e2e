@@ -46,4 +46,32 @@ describe('refusalLeaks (PS-07)', () => {
     expect(refusalLeaks('{"error":"forbidden","message":"state unknown, amount_paid not shown"}', 'x')).toEqual([]);
     expect(refusalLeaks('{"error":"forbidden","code":"403"}', 'x')).toEqual([]);
   });
+
+  // The reference must not occur in the bodies: `&#x22;` contains an x.
+  const REF = 'QIUHFBAPK';
+
+  it('finds contract fields and markup written with HTML entities in an HTML body (#18)', () => {
+    const page = (inner: string) => `<!DOCTYPE html><html><body><div data-props="${inner}"></div></body></html>`;
+    expect(refusalLeaks(page('{&quot;state&quot;:&quot;waiting&quot;}'), REF)).toEqual(['field state']);
+    expect(refusalLeaks(page('{&#34;amount_paid&#34;:&#34;1&#34;}'), REF)).toEqual(['field amount_paid']);
+    expect(refusalLeaks(page('{&#x22;seconds_left&#x22; : 120}'), REF)).toEqual(['field seconds_left']);
+    expect(refusalLeaks(page('{&#X22;hash&#X22;:&#X22;ABC&#X22;}'), REF)).toEqual(['field hash']);
+    expect(refusalLeaks(page('{&QUOT;redirect&QUOT;:&QUOT;/x&QUOT;}'), REF)).toEqual(['field redirect']);
+    expect(refusalLeaks(page('{&quotshortfall&quot:0}'), REF)).toEqual(['field shortfall']);
+    expect(refusalLeaks(page('{&#34base_asset&#34&colon;"XRP"}'), REF)).toEqual(['field base_asset']);
+    expect(refusalLeaks('<p>data&#45;ld-state</p><p>data&hyphen;ld-amount</p>', REF)).toEqual(['payment page markup']);
+    expect(refusalLeaks('&lt;div data-ld-state=&quot;waiting&quot;&gt;', REF)).toEqual(['payment page markup']);
+  });
+
+  it('decodes HTML entities written twice and inside JSON string values (#18)', () => {
+    expect(refusalLeaks('<pre>{&amp;quot;state&amp;quot;:1}</pre>', REF)).toEqual(['field state']);
+    expect(refusalLeaks('<pre>{&amp;#34;amount_requested&amp;#x22;:1}</pre>', REF)).toEqual(['field amount_requested']);
+    expect(refusalLeaks(JSON.stringify({ error: 'forbidden', html: '<div data-x="{&quot;schema_version&quot;:1}"></div>' }), REF)).toEqual(['field schema_version']);
+    expect(refusalLeaks(JSON.stringify({ error: 'forbidden', details: '{&quot;state&quot;:&quot;waiting&quot;}' }), REF)).toEqual(['field state']);
+  });
+
+  it('accepts an entity-encoded HTML page that only mentions contract words (#18)', () => {
+    expect(refusalLeaks('<p>&quot;state&quot; unknown &amp; amount_paid not shown &#8212; 403</p>', REF)).toEqual([]);
+    expect(refusalLeaks('<p>&unknown; &#0; &#x110000; &#99999999; &amp</p>', REF)).toEqual([]);
+  });
 });
