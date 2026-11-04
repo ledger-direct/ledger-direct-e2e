@@ -59,7 +59,8 @@ describe('refusalLeaks (PS-07)', () => {
     expect(refusalLeaks(page('{&QUOT;redirect&QUOT;:&QUOT;/x&QUOT;}'), REF)).toEqual(['field redirect']);
     expect(refusalLeaks(page('{&quotshortfall&quot:0}'), REF)).toEqual(['field shortfall']);
     expect(refusalLeaks(page('{&#34base_asset&#34&colon;"XRP"}'), REF)).toEqual(['field base_asset']);
-    expect(refusalLeaks('<p>data&#45;ld-state</p><p>data&hyphen;ld-amount</p>', REF)).toEqual(['payment page markup']);
+    expect(refusalLeaks('<p>data&#45;ld-state</p>', REF)).toEqual(['payment page markup']);
+    expect(refusalLeaks('<p>data&hyphen;ld-state data&dash;ld-amount</p>', REF)).toEqual([]);
     expect(refusalLeaks('&lt;div data-ld-state=&quot;waiting&quot;&gt;', REF)).toEqual(['payment page markup']);
   });
 
@@ -69,6 +70,14 @@ describe('refusalLeaks (PS-07)', () => {
     expect(refusalLeaks(JSON.stringify({ error: 'forbidden', html: '<div data-x="{&quot;schema_version&quot;:1}"></div>' }), REF)).toEqual(['field schema_version']);
     expect(refusalLeaks(JSON.stringify({ error: 'forbidden', details: '{&quot;state&quot;:&quot;waiting&quot;}' }), REF)).toEqual(['field state']);
     expect(refusalLeaks('<pre>{&amp;amp;amp;quot;hash&amp;amp;amp;quot;:1}</pre>', REF)).toEqual(['field hash']);
+  });
+
+  it('decodes every named entity that can write a marker character (#18)', () => {
+    expect(refusalLeaks('<p>{&quot;base&lowbar;asset&quot;:1}</p>', REF)).toEqual(['field base_asset']);
+    expect(refusalLeaks('<p>{&quot;amount&UnderBar;paid&quot;:1}</p>', REF)).toEqual(['field amount_paid']);
+    for (const space of ['&Tab;', '&NewLine;', '&nbsp;', '&nbsp', '&NonBreakingSpace;', '&ensp;', '&emsp;', '&emsp13;', '&emsp14;', '&numsp;', '&puncsp;', '&thinsp;', '&ThinSpace;', '&hairsp;', '&VeryThinSpace;', '&MediumSpace;']) {
+      expect(refusalLeaks(`<p>{&quot;state&quot;${space}:1}</p>`, REF), space).toEqual(['field state']);
+    }
   });
 
   it('decodes numeric references with leading zeroes (#18)', () => {
