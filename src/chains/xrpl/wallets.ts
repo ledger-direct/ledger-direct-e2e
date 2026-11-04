@@ -53,6 +53,16 @@ export async function setTrustlines(client: Client, wallet: Wallet, assets: Excl
   return results;
 }
 
+/**
+ * Throws unless every TrustSet of `setTrustlines()` succeeded. A validated tec result
+ * leaves the line as it was (missing, or limit 0), so whatever comes next — receiving a
+ * payment, a sweep paying a coin back, a DEX purchase — would fail or misbehave later.
+ */
+export function requireTrustlines(results: Record<string, string>): void {
+  const failed = Object.entries(results).filter(([, code]) => code !== 'tesSUCCESS');
+  if (failed.length > 0) throw new Error(`trust line not set: ${failed.map(([asset, code]) => `${asset} ${code}`).join(', ')}`);
+}
+
 /** A brand-new funded account. `trustlines` makes it able to receive the stablecoins. */
 export async function createFresh(client: Client, options: { trustlines?: boolean } = {}): Promise<{ wallet: Wallet; trustlines: Record<string, string> }> {
   const funded = await faucet();
@@ -61,6 +71,7 @@ export async function createFresh(client: Client, options: { trustlines?: boolea
   // The faucet answers before the funding transaction is validated; wait for the account to exist.
   await waitForAccount(client, wallet.classicAddress);
   const trustlines = options.trustlines ? await setTrustlines(client, wallet) : {};
+  requireTrustlines(trustlines);
   return { wallet, trustlines };
 }
 

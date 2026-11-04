@@ -8,7 +8,7 @@ import { TESTNET_ISSUED, assetFromCurrency, isAsset } from './chains/xrpl/assets
 import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { ensureTreasury, isAccountNotFound, type Stablecoin } from './chains/xrpl/ensure.js';
-import { balances as xrplBalances, faucet, setTrustlines } from './chains/xrpl/wallets.js';
+import { balances as xrplBalances, faucet, requireTrustlines, setTrustlines } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
 import { TRY_PRESETS, tryShopAccount, type TrySelection } from './drivers/try.js';
@@ -105,7 +105,7 @@ wallet
       // A real limit first: a line a filled offer creates has limit 0, and a run's sweep
       // could then not pay the coin back to the treasury. TrustSet is idempotent.
       const coins = [...(opts.rlusd ? ['RLUSD' as const] : []), ...(opts.usdc ? ['USDC' as const] : [])];
-      if (coins.length > 0) await setTrustlines(c, w, coins);
+      if (coins.length > 0) requireTrustlines(await setTrustlines(c, w, coins));
       if (opts.rlusd) r.RLUSD = await buy(c, w, 'RLUSD', opts.rlusd, opts.maxXrp);
       if (opts.usdc) r.USDC = await buy(c, w, 'USDC', opts.usdc, opts.maxXrp);
       r.balances = await xrplBalances(c, w.classicAddress);
@@ -156,7 +156,7 @@ wallet
             throw error;
           }
         },
-        setLine: async (coin: Stablecoin) => void (await setTrustlines(c, w, [coin])),
+        setLine: async (coin: Stablecoin) => requireTrustlines(await setTrustlines(c, w, [coin])),
         buy: async (coin: Stablecoin, amount: string) => (await buy(c, w, coin, amount, opts.maxXrp)).result,
         pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         log: (line) => process.stderr.write(line + '\n'),

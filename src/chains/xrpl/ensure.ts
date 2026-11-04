@@ -9,9 +9,10 @@
  * shortfall named, instead of a payment failing mid-run with tecUNFUNDED_PAYMENT.
  *
  * The treasury's trust lines are checked first, whatever the balances: a line that is
- * missing or has limit 0 (one a filled DEX offer created, after a testnet reset or an
- * old `wallet top-up`) is set to a real limit, or the sweeps of later runs could not
- * pay the coin back.
+ * missing, has limit 0 (one a filled DEX offer created, after a testnet reset or an
+ * old `wallet top-up`) or has less than LINE_HEADROOM of room above the balance is set
+ * to the full limit, or the sweeps of later runs could not pay the coin back: an
+ * incoming payment cannot raise a balance above its line's limit.
  */
 export type Stablecoin = 'RLUSD' | 'USDC';
 
@@ -46,6 +47,9 @@ export interface EnsureResult {
   actions: string[];
 }
 
+/** Room a treasury line keeps above its balance for the coins runs return; far above a run's few units. */
+export const LINE_HEADROOM = 1000;
+
 const FAUCET_REQUESTS = 3;
 const FAUCET_SETTLE_POLLS = 10;
 const POLL_MS = 3000;
@@ -74,8 +78,9 @@ export async function ensureTreasury(minimums: Minimums, deps: EnsureDeps): Prom
   const limits = await deps.lineLimits();
   for (const coin of Object.keys(minimums.tokens) as Stablecoin[]) {
     const limit = limits[coin];
-    if (limit !== undefined && Number(limit) > 0) continue;
-    deps.log(`${coin} trust line ${limit === undefined ? 'missing' : 'has limit 0'}: setting it`);
+    const room = limit === undefined ? -Infinity : Number(limit) - (state.tokens[coin] ?? 0);
+    if (room >= LINE_HEADROOM) continue;
+    deps.log(`${coin} trust line ${limit === undefined ? 'missing' : `limit ${limit} leaves ${room} of room`}: setting it`);
     await deps.setLine(coin);
     actions.push(`trust line ${coin}`);
   }

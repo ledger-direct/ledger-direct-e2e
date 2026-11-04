@@ -94,6 +94,19 @@ describe('ensureTreasury', () => {
     expect(result.actions).toEqual(['trust line RLUSD', 'trust line USDC']);
   });
 
+  it('raises a line whose limit leaves too little room above the balance', async () => {
+    const { deps, calls } = treasury({ xrp: 200, tokens: { RLUSD: 20, USDC: 20 } }, { limits: { RLUSD: '20', USDC: '1020' } });
+    await ensureTreasury(minimums, deps);
+    expect(calls.lines).toEqual(['RLUSD']);
+  });
+
+  it('stops when setting a line fails', async () => {
+    const { deps, calls } = treasury({ xrp: 200, tokens: { RLUSD: 20, USDC: 20 } }, { limits: { RLUSD: '0' } });
+    const failing: EnsureDeps = { ...deps, setLine: async () => { throw new Error('trust line not set: RLUSD tecNO_LINE_INSUF_RESERVE'); } };
+    await expect(ensureTreasury(minimums, failing)).rejects.toThrow('tecNO_LINE_INSUF_RESERVE');
+    expect(calls.buy).toEqual([]);
+  });
+
   it('sets the lines before it buys', async () => {
     const order: string[] = [];
     const { deps } = treasury({ xrp: 100, tokens: {} }, { limits: {} });
@@ -105,5 +118,15 @@ describe('ensureTreasury', () => {
   it('fails when the DEX book cannot fill the purchase', async () => {
     const { deps } = treasury({ xrp: 100, tokens: { RLUSD: 20, USDC: 2 } }, { fills: { USDC: 1 } });
     await expect(ensureTreasury(minimums, deps)).rejects.toThrow('USDC 3 < 10');
+  });
+});
+
+describe('requireTrustlines', () => {
+  it('passes when every TrustSet succeeded and names every one that did not', async () => {
+    const { requireTrustlines } = await import('../src/chains/xrpl/wallets.js');
+    expect(() => requireTrustlines({ RLUSD: 'tesSUCCESS', USDC: 'tesSUCCESS' })).not.toThrow();
+    expect(() => requireTrustlines({})).not.toThrow();
+    expect(() => requireTrustlines({ RLUSD: 'tesSUCCESS', USDC: 'tecNO_LINE_INSUF_RESERVE' })).toThrow('trust line not set: USDC tecNO_LINE_INSUF_RESERVE');
+    expect(() => requireTrustlines({ RLUSD: 'unknown' })).toThrow('RLUSD unknown');
   });
 });
