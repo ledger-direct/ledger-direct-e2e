@@ -70,12 +70,13 @@ describe('refusalLeaks (PS-07)', () => {
     expect(refusalLeaks(JSON.stringify({ error: 'forbidden', html: '<div data-x="{&quot;schema_version&quot;:1}"></div>' }), REF)).toEqual(['field schema_version']);
     expect(refusalLeaks(JSON.stringify({ error: 'forbidden', details: '{&quot;state&quot;:&quot;waiting&quot;}' }), REF)).toEqual(['field state']);
     expect(refusalLeaks('<pre>{&amp;amp;amp;quot;hash&amp;amp;amp;quot;:1}</pre>', REF)).toEqual(['field hash']);
+    expect(refusalLeaks('<pre>{&amp;amp;amp;amp;quot;hash&amp;amp;amp;amp;quot;:1}</pre>', REF)).toEqual([]);
   });
 
   it('decodes every named entity that can write a marker character (#18)', () => {
     expect(refusalLeaks('<p>{&quot;base&lowbar;asset&quot;:1}</p>', REF)).toEqual(['field base_asset']);
     expect(refusalLeaks('<p>{&quot;amount&UnderBar;paid&quot;:1}</p>', REF)).toEqual(['field amount_paid']);
-    for (const space of ['&Tab;', '&NewLine;', '&nbsp;', '&nbsp', '&NonBreakingSpace;', '&ensp;', '&emsp;', '&emsp13;', '&emsp14;', '&numsp;', '&puncsp;', '&thinsp;', '&ThinSpace;', '&hairsp;', '&VeryThinSpace;', '&MediumSpace;']) {
+    for (const space of ['&Tab;', '&NewLine;', '&nbsp;', '&nbsp', '&NonBreakingSpace;', '&ensp;', '&emsp;', '&emsp13;', '&emsp14;', '&numsp;', '&puncsp;', '&thinsp;', '&ThinSpace;', '&hairsp;', '&VeryThinSpace;', '&MediumSpace;', '&ThickSpace;']) {
       expect(refusalLeaks(`<p>{&quot;state&quot;${space}:1}</p>`, REF), space).toEqual(['field state']);
     }
   });

@@ -77,7 +77,8 @@ function walk(value: unknown, found: Found, decodings: number): void {
 /**
  * Every named entity that can write a character of a marker: the quote, the
  * colon, the underscore of a field name, whitespace before the colon (all that
- * `\s` matches), and `&`, `<`, `>` for markup written twice. Letters and `-`
+ * `\s` matches), and `&`, `<`, `>` for markup written twice. The full set from
+ * the HTML named character references (html.spec.whatwg.org/entities.json). Letters and `-`
  * have no named entity; they come as numeric references.
  */
 const NAMED_ENTITIES: Record<string, string> = {
@@ -86,6 +87,7 @@ const NAMED_ENTITIES: Record<string, string> = {
   Tab: '\t', NewLine: '\n', nbsp: '\u00a0', NonBreakingSpace: '\u00a0',
   ensp: '\u2002', emsp: '\u2003', emsp13: '\u2004', emsp14: '\u2005', numsp: '\u2007', puncsp: '\u2008',
   thinsp: '\u2009', ThinSpace: '\u2009', hairsp: '\u200a', VeryThinSpace: '\u200a', MediumSpace: '\u205f',
+  ThickSpace: '\u205f\u200a',
 };
 /** HTML also reads these without `;` (`&quot`, `&quotstate`); matched in any case, a little wider than HTML, which only errs towards a finding. */
 const LEGACY_ENTITIES: Record<string, string> = { quot: '"', amp: '&', lt: '<', gt: '>', nbsp: '\u00a0' };
