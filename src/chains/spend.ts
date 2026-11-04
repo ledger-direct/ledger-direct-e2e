@@ -1,4 +1,4 @@
-import type { Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult } from './chain.js';
+import type { Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from './chain.js';
 
 /**
  * The one place every payment passes before it is signed — `ld-e2e pay`, the
@@ -104,10 +104,19 @@ export function resetSpendGuard(): void {
 
 /** A ledger whose payments are charged to the guard before the inner ledger signs them. */
 export class GuardedLedger implements Ledger {
+  /**
+   * Passed through uncharged: a sweep pays from the run's throwaway account back to the
+   * treasury, it does not spend from the treasury, and it moves about 100 XRP, far above
+   * LD_E2E_MAX_PAYMENT. Present only when the inner ledger has it.
+   */
+  readonly sweep?: (seed: string, to: string) => Promise<SweepResult>;
+
   constructor(
     private readonly inner: Ledger,
     private readonly guard: SpendGuard,
-  ) {}
+  ) {
+    if (inner.sweep) this.sweep = (seed, to) => inner.sweep!(seed, to);
+  }
 
   get chain(): ChainId {
     return this.inner.chain;

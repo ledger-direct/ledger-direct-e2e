@@ -22,8 +22,9 @@ Twelve cases with fixed IDs from the LedgerDirect payment-status contract, platf
 PS-12 is Shopware's Store API and runs there only (a run against another platform records it as
 skipped). All twelve run unattended. Two are nightly-only: PS-04 needs the public testnet's issuers,
 PS-10 waits 35 minutes for the payment token to expire. `--cases automated` is the set without those
-two, a dev-shop run in minutes; `--cases nightly` is every case; `--cases all` is the whole catalogue,
-whatever has no runner recorded as skipped.
+two, a dev-shop run in minutes; `--cases testnet` adds PS-04 and leaves out only the long wait, for a
+short run on the public testnet (a version tag); `--cases nightly` is every case; `--cases all` is the
+whole catalogue, whatever has no runner recorded as skipped.
 
 | ID | Case | What it proves |
 |---|---|---|
@@ -235,9 +236,30 @@ ld-e2e wallet fund r...                          # XRPL faucet, +100 XRP
 ld-e2e --chain STELLAR wallet fund G...          # Friendbot, +10 000 XLM
 ld-e2e wallet book RLUSD                         # XRPL only: what the testnet DEX offers
 ld-e2e wallet top-up --rlusd 20                  # XRPL only: buy tokens on the DEX — no faucet web page, no captcha
+ld-e2e wallet ensure --xrp 50 --rlusd 10 --usdc 10   # XRPL only: top the treasury up to these minimums, or fail
 ld-e2e pay --to r... --id 123 --amount 0.83 [--asset RLUSD] [--partial]     # XRPL: --id is the destination tag
 ld-e2e --chain STELLAR pay --to G... --id 123 --amount 1.5                    # Stellar: --id is the MEMO_ID
 ```
+
+**The treasury refills itself.** Every run opens a fresh receiving account at the faucet (100 XRP)
+and the shop is paid into it. At the end of the run, after the shop is back on its own account and
+also when the run broke off, everything on that account goes back to the treasury: the whole balance
+of every stablecoin line, and the XRP above the account's reserve (about 1.4 XRP stays). So a run
+returns what it paid plus the faucet's 100 XRP, instead of only paying out; the report carries it as
+`returned`. `--keep-account` keeps the account (the shop still points at it), and so does a run with
+a given `--receiving-account`. On XRPL only; on Stellar the account stays as it is.
+
+`wallet ensure` is the safety net for what still drains the treasury (a run killed before it could
+return anything, a testnet reset): it asks the faucet for XRP and buys stablecoins on the DEX until
+the minimums hold, and fails naming the shortfall otherwise. The e2e workflows run it before the
+cases, so a dry treasury fails there and not with `tecUNFUNDED_PAYMENT` in the middle of a run.
+
+**Two runs, one treasury.** Every plugin repository's runs pay from the same CI treasury. Two runs that
+sign at the same moment get the same sequence number, and the second submit answers `tefPAST_SEQ`.
+Every XRPL transaction goes through `submitWithRetry()` (`src/chains/xrpl/submit.ts`): on
+`tefPAST_SEQ`, which can never apply, it fills in a fresh sequence and submits again (three attempts
+at most). `terPRE_SEQ` is waited for, never resubmitted: rippled may still apply it, and a second one
+would pay twice.
 
 On Stellar, issued assets (USDC, EURC) are not listed until the core's Stellar registry ships;
 `wallet status` shows XLM only, and a test asset can be issued for the wrong-asset case.

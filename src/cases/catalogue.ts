@@ -14,6 +14,8 @@ export interface CaseSpec {
   expects: string[];
   /** Cases that need the public testnet even once a local node exists (PS-04) or a long wait (PS-10). */
   nightlyOnly?: boolean;
+  /** Cases that wait for a timeout to pass (PS-10: 35 minutes); left out of the `testnet` set. */
+  longWait?: boolean;
   /**
    * The platforms a case exists for; absent means every one. The catalogue is
    * platform-neutral by design, so this stays rare: PS-12 is Shopware's Store API.
@@ -49,7 +51,7 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'PS-09', title: 'Safety net without a browser', asset: 'XRP', summary: 'Pay with the page closed, trigger cron / scheduled task.',
     expects: ['order settles without a poll'] },
   { id: 'PS-10', title: 'Late return after the checkout session is gone', asset: 'XRP', summary: 'Pay 35 minutes after checkout.',
-    expects: ['status endpoint settles', 'redirect goes to an order page, not an expired return URL'], nightlyOnly: true },
+    expects: ['status endpoint settles', 'redirect goes to an order page, not an expired return URL'], nightlyOnly: true, longWait: true },
   { id: 'PS-11', title: 'Closed by the merchant', asset: 'XRP', summary: 'Merchant cancels, customer pays anyway, the safety net runs.',
     expects: ['redirect present', 'no state change back to open', 'after the safety net the payment is on record for the merchant'] },
   { id: 'PS-12', title: 'Headless: quote and status over the Store API', asset: 'XRP', summary: 'Order placed, then as a guest without a session: quote with the deepLinkCode, status over the Store API with the access key, pay, redirect; a wrong code refused like an unknown order.',

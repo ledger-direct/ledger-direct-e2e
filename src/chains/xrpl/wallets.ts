@@ -1,6 +1,7 @@
 import { Client, Wallet, TrustSet, TrustSetFlags } from 'xrpl';
 import { httpFetch } from '../../http.js';
 import { ASSETS, Asset, TESTNET_FAUCET, TESTNET_ISSUED, assetFromCurrency } from './assets.js';
+import { submitWithRetry } from './submit.js';
 
 export interface Balances {
   address: string;
@@ -45,12 +46,21 @@ export async function setTrustlines(client: Client, wallet: Wallet, assets: Excl
       LimitAmount: { currency: issued.currency, issuer: issued.issuer, value: limit },
       Flags: TrustSetFlags.tfSetNoRipple,
     };
-    const prepared = await client.autofill(tx);
-    const result = await client.submitAndWait(wallet.sign(prepared).tx_blob);
+    const result = await submitWithRetry(client, wallet, tx);
     const meta = result.result.meta;
     results[asset] = typeof meta === 'object' && meta !== null && 'TransactionResult' in meta ? String(meta.TransactionResult) : 'unknown';
   }
   return results;
+}
+
+/**
+ * Throws unless every TrustSet of `setTrustlines()` succeeded. A validated tec result
+ * leaves the line as it was (missing, or limit 0), so whatever comes next — receiving a
+ * payment, a sweep paying a coin back, a DEX purchase — would fail or misbehave later.
+ */
+export function requireTrustlines(results: Record<string, string>): void {
+  const failed = Object.entries(results).filter(([, code]) => code !== 'tesSUCCESS');
+  if (failed.length > 0) throw new Error(`trust line not set: ${failed.map(([asset, code]) => `${asset} ${code}`).join(', ')}`);
 }
 
 /** A brand-new funded account. `trustlines` makes it able to receive the stablecoins. */
@@ -61,6 +71,7 @@ export async function createFresh(client: Client, options: { trustlines?: boolea
   // The faucet answers before the funding transaction is validated; wait for the account to exist.
   await waitForAccount(client, wallet.classicAddress);
   const trustlines = options.trustlines ? await setTrustlines(client, wallet) : {};
+  requireTrustlines(trustlines);
   return { wallet, trustlines };
 }
 

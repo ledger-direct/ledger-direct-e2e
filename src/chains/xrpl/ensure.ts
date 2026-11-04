@@ -1,0 +1,129 @@
+/**
+ * Keeps the treasury above the minimums a run needs, before the run starts.
+ *
+ * Since runs return their throwaway account's funds (sweep.ts) the treasury mostly
+ * refills itself; this is the safety net for what still drains it: a run that broke
+ * off before it could return anything, a testnet reset, the reserve. XRP comes from
+ * the faucet (about 100 per request), the stablecoins from the testnet DEX like
+ * `wallet top-up`. A treasury that cannot be brought up fails here, with the
+ * shortfall named, instead of a payment failing mid-run with tecUNFUNDED_PAYMENT.
+ *
+ * The treasury's trust lines are checked first, whatever the balances: a line that is
+ * missing, has limit 0 (one a filled DEX offer created, after a testnet reset or an
+ * old `wallet top-up`) or has less than LINE_HEADROOM of room above the balance is set
+ * to the full limit, or the sweeps of later runs could not pay the coin back: an
+ * incoming payment cannot raise a balance above its line's limit.
+ */
+export type Stablecoin = 'RLUSD' | 'USDC';
+
+export interface Minimums {
+  xrp: number;
+  tokens: Partial<Record<Stablecoin, number>>;
+}
+
+export interface TreasuryState {
+  xrp: number;
+  tokens: Partial<Record<Stablecoin, number>>;
+}
+
+export interface EnsureDeps {
+  read(): Promise<TreasuryState>;
+  /** The limit of the treasury's line per coin, as the ledger states it; absent when there is no line. */
+  lineLimits(): Promise<Partial<Record<Stablecoin, string>>>;
+  /** Sets the treasury's line for the coin to a real limit (TrustSet, idempotent). */
+  setLine(coin: Stablecoin): Promise<void>;
+  /** One faucet request to the treasury. */
+  fund(): Promise<void>;
+  /** Buys `amount` of the coin on the DEX, spending at most the configured XRP. */
+  buy(coin: Stablecoin, amount: string): Promise<string>;
+  /** Waits briefly; a faucet answers before its payment is validated. */
+  pause(ms: number): Promise<void>;
+  log(line: string): void;
+}
+
+export interface EnsureResult {
+  before: TreasuryState;
+  after: TreasuryState;
+  actions: string[];
+}
+
+/** Room a treasury line keeps above its balance for the coins runs return; far above a run's few units. */
+export const LINE_HEADROOM = 1000;
+
+const FAUCET_REQUESTS = 3;
+const FAUCET_SETTLE_POLLS = 10;
+const POLL_MS = 3000;
+
+export async function ensureTreasury(minimums: Minimums, deps: EnsureDeps): Promise<EnsureResult> {
+  const before = await deps.read();
+  const actions: string[] = [];
+  let state = before;
+
+  const topUpXrp = async (): Promise<void> => {
+    for (let request = 1; state.xrp < minimums.xrp && request <= FAUCET_REQUESTS; request++) {
+      const had = state.xrp;
+      deps.log(`XRP ${had} is below ${minimums.xrp}: faucet request ${request} of ${FAUCET_REQUESTS}`);
+      await deps.fund();
+      actions.push('faucet');
+      for (let poll = 0; poll < FAUCET_SETTLE_POLLS && state.xrp <= had; poll++) {
+        await deps.pause(POLL_MS);
+        state = await deps.read();
+      }
+    }
+  };
+
+  // XRP first: the line repairs and the purchases below pay with it.
+  await topUpXrp();
+
+  const limits = await deps.lineLimits();
+  for (const coin of Object.keys(minimums.tokens) as Stablecoin[]) {
+    const limit = limits[coin];
+    const room = limit === undefined ? -Infinity : Number(limit) - (state.tokens[coin] ?? 0);
+    if (room >= LINE_HEADROOM) continue;
+    deps.log(`${coin} trust line ${limit === undefined ? 'missing' : `limit ${limit} leaves ${room} of room`}: setting it`);
+    await deps.setLine(coin);
+    actions.push(`trust line ${coin}`);
+  }
+
+  let bought = false;
+  for (const coin of Object.keys(minimums.tokens) as Stablecoin[]) {
+    const want = minimums.tokens[coin] ?? 0;
+    const have = state.tokens[coin] ?? 0;
+    if (have >= want) continue;
+    bought = true;
+    // The shortfall, rounded up to the cent; the DEX fills what its book allows.
+    const amount = (Math.ceil((want - have) * 100) / 100).toFixed(2);
+    deps.log(`${coin} ${have} is below ${want}: buying ${amount} on the DEX`);
+    const result = await deps.buy(coin, amount);
+    actions.push(`buy ${amount} ${coin}: ${result}`);
+    state = await deps.read();
+  }
+  // The purchases spent XRP; bring it back above the minimum.
+  if (bought) await topUpXrp();
+
+  const short = shortfalls(minimums, state);
+  if (short.length > 0) {
+    throw new Error(`treasury below its minimums after topping up: ${short.join(', ')}; a run would fail mid-way. Check the faucet and the DEX book (ld-e2e wallet book <asset>).`);
+  }
+  return { before, after: state, actions };
+}
+
+/**
+ * Whether a ledger request failed because the account does not exist: after a testnet
+ * reset the treasury is gone until the faucet creates it again, so `ensure` reads it as
+ * empty instead of failing before it can ask the faucet.
+ */
+export function isAccountNotFound(error: unknown): boolean {
+  return (error as { data?: { error?: string } } | null)?.data?.error === 'actNotFound';
+}
+
+export function shortfalls(minimums: Minimums, state: TreasuryState): string[] {
+  const short: string[] = [];
+  if (state.xrp < minimums.xrp) short.push(`XRP ${state.xrp} < ${minimums.xrp}`);
+  for (const coin of Object.keys(minimums.tokens) as Stablecoin[]) {
+    const want = minimums.tokens[coin] ?? 0;
+    const have = state.tokens[coin] ?? 0;
+    if (have < want) short.push(`${coin} ${have} < ${want}`);
+  }
+  return short;
+}

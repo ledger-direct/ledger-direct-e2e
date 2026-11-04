@@ -4,10 +4,11 @@ import { Command } from 'commander';
 import { Wallet } from 'xrpl';
 import { CASES, findCase } from './cases/catalogue.js';
 import { CHAINS, isAccountOf, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
-import { isAsset } from './chains/xrpl/assets.js';
+import { TESTNET_ISSUED, assetFromCurrency, isAsset } from './chains/xrpl/assets.js';
 import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
-import { balances as xrplBalances } from './chains/xrpl/wallets.js';
+import { ensureTreasury, isAccountNotFound, type Stablecoin } from './chains/xrpl/ensure.js';
+import { balances as xrplBalances, faucet, requireTrustlines, setTrustlines } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
 import { TRY_PRESETS, tryShopAccount, type TrySelection } from './drivers/try.js';
@@ -101,12 +102,70 @@ wallet
     const w = Wallet.fromSeed(requireSeed(opts.seedEnv));
     const results = await withClient(async (c) => {
       const r: Record<string, unknown> = {};
+      // A real limit first: a line a filled offer creates has limit 0, and a run's sweep
+      // could then not pay the coin back to the treasury. TrustSet is idempotent.
+      const coins = [...(opts.rlusd ? ['RLUSD' as const] : []), ...(opts.usdc ? ['USDC' as const] : [])];
+      if (coins.length > 0) requireTrustlines(await setTrustlines(c, w, coins));
       if (opts.rlusd) r.RLUSD = await buy(c, w, 'RLUSD', opts.rlusd, opts.maxXrp);
       if (opts.usdc) r.USDC = await buy(c, w, 'USDC', opts.usdc, opts.maxXrp);
       r.balances = await xrplBalances(c, w.classicAddress);
       return r;
     });
     out(results, () => redact(JSON.stringify(results, null, 2)));
+  });
+
+wallet
+  .command('ensure')
+  .description('XRPL: bring the treasury up to the minimums a run needs (XRP from the faucet, stablecoins from the DEX), or fail naming the shortfall')
+  .option('--xrp <value>', 'XRP at least', '50')
+  .option('--rlusd <value>', 'RLUSD at least', '10')
+  .option('--usdc <value>', 'USDC at least', '10')
+  .option('--max-xrp <value>', 'XRP to spend per stablecoin purchase at most', '50')
+  .option('--seed-env <variable>', 'environment variable holding the seed', 'LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED')
+  .action(async (opts: { xrp: string; rlusd: string; usdc: string; maxXrp: string; seedEnv: string }) => {
+    if (chain() !== 'XRPL') throw new Error('ensure exists for XRPL only');
+    const w = Wallet.fromSeed(requireSeed(opts.seedEnv));
+    const minimums = { xrp: Number(opts.xrp), tokens: { RLUSD: Number(opts.rlusd), USDC: Number(opts.usdc) } };
+    for (const [name, value] of [['--xrp', minimums.xrp], ['--rlusd', minimums.tokens.RLUSD], ['--usdc', minimums.tokens.USDC]] as const) {
+      if (!Number.isFinite(value) || value < 0) throw new Error(`${name}: "${value}" is not a non-negative number`);
+    }
+    const result = await withClient((c) =>
+      ensureTreasury(minimums, {
+        read: async () => {
+          try {
+            const b = await xrplBalances(c, w.classicAddress);
+            return { xrp: Number(b.xrp), tokens: { RLUSD: Number(b.tokens.RLUSD ?? 0), USDC: Number(b.tokens.USDC ?? 0) } };
+          } catch (error) {
+            // A reset testnet no longer knows the treasury; the faucet creates it again.
+            if (isAccountNotFound(error)) return { xrp: 0, tokens: { RLUSD: 0, USDC: 0 } };
+            throw error;
+          }
+        },
+        fund: async () => void (await faucet(w.classicAddress)),
+        lineLimits: async () => {
+          try {
+            const lines = await c.request({ command: 'account_lines', account: w.classicAddress, ledger_index: 'validated' });
+            const limits: Partial<Record<Stablecoin, string>> = {};
+            for (const line of lines.result.lines) {
+              const asset = assetFromCurrency(line.currency);
+              if ((asset === 'RLUSD' || asset === 'USDC') && TESTNET_ISSUED[asset].issuer === line.account) limits[asset] = line.limit;
+            }
+            return limits;
+          } catch (error) {
+            if (isAccountNotFound(error)) return {};
+            throw error;
+          }
+        },
+        setLine: async (coin: Stablecoin) => requireTrustlines(await setTrustlines(c, w, [coin])),
+        buy: async (coin: Stablecoin, amount: string) => (await buy(c, w, coin, amount, opts.maxXrp)).result,
+        pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+        log: (line) => process.stderr.write(line + '\n'),
+      }),
+    );
+    out(result, () => {
+      const fmt = (t: typeof result.after) => `XRP ${t.xrp}, RLUSD ${t.tokens.RLUSD ?? 0}, USDC ${t.tokens.USDC ?? 0}`;
+      return result.actions.length === 0 ? `treasury above its minimums: ${fmt(result.after)}` : `treasury topped up (${result.actions.join('; ')}): ${fmt(result.before)} → ${fmt(result.after)}`;
+    });
   });
 
 wallet
@@ -193,7 +252,7 @@ program
   .option('--compose-files <files>', 'WooCommerce: comma-separated compose files to pass with -f (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
   .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
   .option('--container <name>', 'Shopware: docker container for the scheduled task (LD_E2E_SHOPWARE_CONTAINER)')
-  .option('--cases <ids>', 'comma-separated case IDs, "automated" (every runner but the nightly-only cases), "nightly" (every runner), or "all" (the catalogue)', 'automated')
+  .option('--cases <ids>', 'comma-separated case IDs, "automated" (every runner but the nightly-only cases), "testnet" (every runner but the long waits: automated plus PS-04), "nightly" (every runner), or "all" (the catalogue)', 'automated')
   .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging)')
   .option('--keep-account', "leave the run's receiving account configured; by default the shop goes back to its own (LD_E2E_<TARGET>_SHOP_ACCOUNT or the wallet file's LEDGERDIRECT_TESTNET_<TARGET>_SHOP_ADDRESS)", false)
   .option('--timeout <seconds>', 'per-case wait for a state', '240')

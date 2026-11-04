@@ -72,6 +72,15 @@ export interface IncomingPayment {
   explorer: string;
 }
 
+/** What a sweep sent back to the treasury: the native asset and each issued asset, as decimal strings. */
+export interface SweepResult {
+  native: string;
+  tokens: Record<string, string>;
+  hashes: string[];
+  /** Returns that failed; the others still went through. */
+  failed: string[];
+}
+
 export interface FreshAccount {
   address: string;
   seed: string;
@@ -89,6 +98,11 @@ export interface Ledger {
   fund(address: string): Promise<{ address: string; amount: string }>;
   balances(address: string): Promise<Balances>;
   pay(request: PaymentRequest): Promise<PaymentResult>;
+  /**
+   * Sends everything above the reserve from a run's throwaway account (its seed) back to
+   * `to`, the treasury. Optional: a chain without it leaves the account as it is.
+   */
+  sweep?(seed: string, to: string): Promise<SweepResult>;
   /** Payments that arrived at `address`, newest first; with `identifier`, only those carrying it. */
   incoming(address: string, options?: { identifier?: string; limit?: number }): Promise<IncomingPayment[]>;
   explorerUrl(hash: string): string;
