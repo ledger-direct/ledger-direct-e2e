@@ -11,13 +11,25 @@ interface Account {
   lines: { account: string; currency: string; balance: string }[];
   balanceDrops: string;
   ownerCount: number;
+  /** Per currency: what the ledger reports as delivered (absent: no delivered_amount in the metadata). */
+  delivered?: Record<string, string>;
+  /** Per currency: what stays on the line after a successful return (default 0). */
+  residual?: Record<string, string>;
+  /** The second account_lines read fails. */
+  rereadFails?: boolean;
 }
 
 function setup(account: Account, outcomes: string | string[] = 'tesSUCCESS') {
   const sent: Payment[] = [];
+  const lines = account.lines.map((l) => ({ ...l }));
+  let linesReads = 0;
   const client = {
     async request(req: { command: string }) {
-      if (req.command === 'account_lines') return { result: { lines: account.lines } };
+      if (req.command === 'account_lines') {
+        linesReads += 1;
+        if (linesReads > 1 && account.rereadFails) throw new Error('timeout');
+        return { result: { lines: lines.map((l) => ({ ...l })) } };
+      }
       if (req.command === 'account_info') return { result: { account_data: { Balance: account.balanceDrops, OwnerCount: account.ownerCount } } };
       if (req.command === 'server_info') return { result: { info: { validated_ledger: { reserve_base_xrp: 1, reserve_inc_xrp: 0.2 } } } };
       throw new Error(`unexpected ${req.command}`);
@@ -26,7 +38,15 @@ function setup(account: Account, outcomes: string | string[] = 'tesSUCCESS') {
   const submit = async (_c: Client, _w: Wallet, tx: Payment) => {
     sent.push(tx);
     const outcome = Array.isArray(outcomes) ? (outcomes[sent.length - 1] ?? 'tesSUCCESS') : outcomes;
-    return { result: { hash: `H${sent.length}`, validated: true, meta: { TransactionResult: outcome } } } as unknown as TxResponse;
+    const meta: Record<string, unknown> = { TransactionResult: outcome };
+    if (typeof tx.Amount === 'object' && outcome === 'tesSUCCESS') {
+      const { currency, issuer } = tx.Amount as { currency: string; issuer: string };
+      const line = lines.find((l) => l.currency === currency && l.account === issuer)!;
+      line.balance = account.residual?.[currency] ?? '0';
+      const value = account.delivered?.[currency];
+      if (value !== undefined) meta.delivered_amount = { currency, issuer, value };
+    }
+    return { result: { hash: `H${sent.length}`, validated: true, meta } } as unknown as TxResponse;
   };
   return { client, sent, submit: submit as unknown as Parameters<typeof sweep>[3] };
 }
@@ -97,5 +117,48 @@ describe('sweep: a run account back to the treasury', () => {
     const result = await sweep(client, run.seed!, treasury, submit);
     expect(result.native).toBe('0');
     expect(result.failed).toEqual([expect.stringContaining('tecNO_DST_INSUF_XRP')]);
+  });
+
+  it('reports what arrived, and a transfer fee that leaves nothing behind is no residual', async () => {
+    const { client, submit } = setup({
+      lines: [{ account: rlusd.issuer, currency: rlusd.currency, balance: '1.5' }],
+      balanceDrops: '101000000',
+      ownerCount: 1,
+      delivered: { [rlusd.currency]: '1.4925' },
+    });
+    const result = await sweep(client, run.seed!, treasury, submit);
+    expect(result.tokens).toEqual({ RLUSD: '1.4925' });
+    expect(result.failed).toEqual([]);
+  });
+
+  it('records what a partial return left on the run account', async () => {
+    const { client, submit } = setup({
+      lines: [
+        { account: rlusd.issuer, currency: rlusd.currency, balance: '1.5' },
+        { account: usdc.issuer, currency: usdc.currency, balance: '0.9' },
+      ],
+      balanceDrops: '101000000',
+      ownerCount: 2,
+      delivered: { [rlusd.currency]: '1', [usdc.currency]: '0.9' },
+      residual: { [rlusd.currency]: '0.5' },
+    });
+    const result = await sweep(client, run.seed!, treasury, submit);
+    expect(result.tokens).toEqual({ RLUSD: '1', USDC: '0.9' });
+    expect(result.failed).toEqual(['0.5 RLUSD left on the run account: the treasury\'s line took less than the balance']);
+    expect(result.native).not.toBe('0');
+  });
+
+  it('does not report a failed return twice', async () => {
+    const { client, submit } = setup({ lines: [{ account: rlusd.issuer, currency: rlusd.currency, balance: '2' }], balanceDrops: '101000000', ownerCount: 1 }, ['tecPATH_DRY', 'tesSUCCESS']);
+    const result = await sweep(client, run.seed!, treasury, submit);
+    expect(result.failed).toHaveLength(1);
+  });
+
+  it('says so when the lines cannot be read again, and still returns the XRP', async () => {
+    const { client, sent, submit } = setup({ lines: [{ account: rlusd.issuer, currency: rlusd.currency, balance: '2' }], balanceDrops: '101000000', ownerCount: 1, rereadFails: true });
+    const result = await sweep(client, run.seed!, treasury, submit);
+    expect(result.failed).toEqual(['could not check the lines after the token returns: timeout']);
+    expect(sent).toHaveLength(2);
+    expect(result.native).toBe('99.799');
   });
 });
