@@ -24,6 +24,12 @@ type Submit = typeof submitWithRetry;
  * A return that fails (a dry path for one token, say) is recorded in `failed` and the
  * others still go out: above all the XRP, which is most of what the account holds.
  *
+ * What a token return reports is what arrived (`delivered_amount`), not the balance sent.
+ * Afterwards the lines are read again: whatever is still on a line that was returned did
+ * not go out (the treasury's line had less room than the balance, say) and is recorded in
+ * `failed`, because the account's seed is gone after the run. A transfer fee lowers what
+ * arrives but leaves nothing behind, so it is no residual.
+ *
  * The account itself stays, with its trust lines and its reserve (about 1.4 XRP):
  * deleting it needs 256 ledgers after its creation, longer than a run.
  */
@@ -33,6 +39,7 @@ export async function sweep(client: Client, seed: string, to: string, submit: Su
   const result: SweepResult = { native: '0', tokens: {}, hashes: [], failed: [] };
 
   const lines = await client.request({ command: 'account_lines', account: from, ledger_index: 'validated' });
+  const returned: AssetKey[] = [];
   for (const line of lines.result.lines) {
     const asset = assetFromCurrency(line.currency);
     if (asset === null || asset === 'XRP') continue;
@@ -43,10 +50,23 @@ export async function sweep(client: Client, seed: string, to: string, submit: Su
     try {
       const response = await submit(client, wallet, tx);
       requireSuccess(response, `${line.balance} ${asset}`);
-      result.tokens[asset] = line.balance;
+      result.tokens[asset] = deliveredValue(response) ?? line.balance;
       result.hashes.push(response.result.hash);
+      returned.push({ asset, currency: line.currency, issuer: line.account });
     } catch (error) {
       result.failed.push(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  if (returned.length > 0) {
+    try {
+      const after = await client.request({ command: 'account_lines', account: from, ledger_index: 'validated' });
+      for (const { asset, currency, issuer } of returned) {
+        const left = after.result.lines.find((l) => l.currency === currency && l.account === issuer)?.balance;
+        if (left !== undefined && Number(left) > 0) result.failed.push(`${left} ${asset} left on the run account: the treasury's line took less than the balance`);
+      }
+    } catch (error) {
+      result.failed.push(`could not check the lines after the token returns: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -70,6 +90,19 @@ export async function sweep(client: Client, seed: string, to: string, submit: Su
     }
   }
   return result;
+}
+
+interface AssetKey {
+  asset: string;
+  currency: string;
+  issuer: string;
+}
+
+/** The value that arrived, from the validated metadata; undefined when the ledger does not say. */
+function deliveredValue(response: Awaited<ReturnType<Submit>>): string | undefined {
+  const meta = response.result.meta;
+  const delivered = typeof meta === 'object' && meta !== null && 'delivered_amount' in meta ? meta.delivered_amount : undefined;
+  return typeof delivered === 'object' && delivered !== null && 'value' in delivered ? String(delivered.value) : undefined;
 }
 
 function requireSuccess(response: Awaited<ReturnType<Submit>>, what: string): void {

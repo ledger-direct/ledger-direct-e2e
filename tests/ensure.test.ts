@@ -4,7 +4,7 @@ import { ensureTreasury, isAccountNotFound, type EnsureDeps, type Stablecoin, ty
 const minimums = { xrp: 50, tokens: { RLUSD: 10, USDC: 10 } as Partial<Record<Stablecoin, number>> };
 
 /** A treasury whose balances the faucet and the DEX change, as configured per test. */
-function treasury(start: TreasuryState, effects: { faucet?: number; fills?: Partial<Record<Stablecoin, number>>; xrpPerBuy?: number; limits?: Partial<Record<Stablecoin, string>> } = {}) {
+function treasury(start: TreasuryState, effects: { faucet?: number; fills?: Partial<Record<Stablecoin, number>>; xrpPerBuy?: number; xrpPerLine?: number; limits?: Partial<Record<Stablecoin, string>> } = {}) {
   let state: TreasuryState = { xrp: start.xrp, tokens: { ...start.tokens } };
   const limits: Partial<Record<Stablecoin, string>> = { ...(effects.limits ?? { RLUSD: '1000000', USDC: '1000000' }) };
   const calls = { fund: 0, buy: [] as string[], lines: [] as string[] };
@@ -14,6 +14,7 @@ function treasury(start: TreasuryState, effects: { faucet?: number; fills?: Part
     setLine: async (coin) => {
       calls.lines.push(coin);
       limits[coin] = '1000000';
+      state = { ...state, xrp: state.xrp - (effects.xrpPerLine ?? 0) };
     },
     fund: async () => {
       calls.fund += 1;
@@ -113,6 +114,15 @@ describe('ensureTreasury', () => {
     const wrapped: EnsureDeps = { ...deps, setLine: async (c) => { order.push(`line ${c}`); await deps.setLine(c); }, buy: async (c, a) => { order.push(`buy ${c}`); return deps.buy(c, a); } };
     await ensureTreasury(minimums, wrapped);
     expect(order).toEqual(['line RLUSD', 'line USDC', 'buy RLUSD', 'buy USDC']);
+  });
+
+  it('reads again after a line repair and tops up the XRP its fee took below the minimum', async () => {
+    const { deps, calls } = treasury({ xrp: 50, tokens: { RLUSD: 20, USDC: 20 } }, { limits: { RLUSD: '0', USDC: '1000000' }, xrpPerLine: 0.000012 });
+    const result = await ensureTreasury(minimums, deps);
+    expect(calls.lines).toEqual(['RLUSD']);
+    expect(calls.buy).toEqual([]);
+    expect(calls.fund).toBe(1);
+    expect(result.after.xrp).toBeGreaterThanOrEqual(50);
   });
 
   it('fails when the DEX book cannot fill the purchase', async () => {
