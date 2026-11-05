@@ -125,6 +125,14 @@ describe('ensureTreasury', () => {
     expect(result.after.xrp).toBeGreaterThanOrEqual(50);
   });
 
+  it('tops up between two repairs, before the second one needs the XRP', async () => {
+    const order: string[] = [];
+    const { deps } = treasury({ xrp: 50, tokens: { RLUSD: 20, USDC: 20 } }, { limits: {}, xrpPerLine: 0.000012 });
+    const wrapped: EnsureDeps = { ...deps, fund: async () => { order.push('faucet'); await deps.fund(); }, setLine: async (c) => { order.push(`line ${c}`); await deps.setLine(c); } };
+    await ensureTreasury(minimums, wrapped);
+    expect(order).toEqual(['line RLUSD', 'faucet', 'line USDC']);
+  });
+
   it('fails when the DEX book cannot fill the purchase', async () => {
     const { deps } = treasury({ xrp: 100, tokens: { RLUSD: 20, USDC: 2 } }, { fills: { USDC: 1 } });
     await expect(ensureTreasury(minimums, deps)).rejects.toThrow('USDC 3 < 10');

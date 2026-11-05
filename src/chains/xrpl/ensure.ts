@@ -76,7 +76,6 @@ export async function ensureTreasury(minimums: Minimums, deps: EnsureDeps): Prom
   await topUpXrp();
 
   const limits = await deps.lineLimits();
-  let repaired = false;
   for (const coin of Object.keys(minimums.tokens) as Stablecoin[]) {
     const limit = limits[coin];
     const room = limit === undefined ? -Infinity : Number(limit) - (state.tokens[coin] ?? 0);
@@ -84,10 +83,7 @@ export async function ensureTreasury(minimums: Minimums, deps: EnsureDeps): Prom
     deps.log(`${coin} trust line ${limit === undefined ? 'missing' : `limit ${limit} leaves ${room} of room`}: setting it`);
     await deps.setLine(coin);
     actions.push(`trust line ${coin}`);
-    repaired = true;
-  }
-  // Each repair paid a fee; read again, XRP at its minimum is now short.
-  if (repaired) {
+    // The repair paid a fee: read again and top up before the next repair or purchase needs the XRP.
     state = await deps.read();
     await topUpXrp();
   }
