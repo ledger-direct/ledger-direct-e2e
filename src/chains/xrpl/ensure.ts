@@ -70,6 +70,8 @@ export async function ensureTreasury(minimums: Minimums, deps: EnsureDeps): Prom
         state = await deps.read();
       }
     }
+    // A line repair or a purchase below the minimum would fail with a less telling result.
+    if (state.xrp < minimums.xrp) throw belowMinimums(minimums, state);
   };
 
   // XRP first: the line repairs and the purchases below pay with it.
@@ -104,11 +106,12 @@ export async function ensureTreasury(minimums: Minimums, deps: EnsureDeps): Prom
   // The purchases spent XRP; bring it back above the minimum.
   if (bought) await topUpXrp();
 
-  const short = shortfalls(minimums, state);
-  if (short.length > 0) {
-    throw new Error(`treasury below its minimums after topping up: ${short.join(', ')}; a run would fail mid-way. Check the faucet and the DEX book (ld-e2e wallet book <asset>).`);
-  }
+  if (shortfalls(minimums, state).length > 0) throw belowMinimums(minimums, state);
   return { before, after: state, actions };
+}
+
+function belowMinimums(minimums: Minimums, state: TreasuryState): Error {
+  return new Error(`treasury below its minimums after topping up: ${shortfalls(minimums, state).join(', ')}; a run would fail mid-way. Check the faucet and the DEX book (ld-e2e wallet book <asset>).`);
 }
 
 /**

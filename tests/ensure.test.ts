@@ -69,6 +69,13 @@ describe('ensureTreasury', () => {
     expect(result.after.xrp).toBe(135);
   });
 
+  it('stops before any repair or purchase when the faucet gives nothing', async () => {
+    const { deps, calls } = treasury({ xrp: 1.7, tokens: { RLUSD: 0, USDC: 20 } }, { faucet: 0, limits: {} });
+    await expect(ensureTreasury(minimums, deps)).rejects.toThrow('XRP 1.7 < 50, RLUSD 0 < 10');
+    expect(calls.lines).toEqual([]);
+    expect(calls.buy).toEqual([]);
+  });
+
   it('fails naming every shortfall when the faucet gives nothing', async () => {
     const { deps, calls } = treasury({ xrp: 1.7, tokens: { RLUSD: 20, USDC: 20 } }, { faucet: 0 });
     await expect(ensureTreasury(minimums, deps)).rejects.toThrow('XRP 1.7 < 50');
