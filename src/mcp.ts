@@ -37,7 +37,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
   const session = options.session ?? new ShopSession();
   const freshSeeds = new Map<string, string>();
   const jobs = new Map<string, { status: 'running' | 'done' | 'failed'; startedAt: string; log: string[]; result?: unknown; error?: string }>();
-  const maxPayment = spendGuard().maxPayment;
+  const maxPayment = spendGuard().describeCap();
 
   const targetSchema = z.enum(TARGETS).describe('the shop under test');
   const chainSchema = z.enum(['XRPL', 'STELLAR']).default('XRPL').describe('the chain; XRPL by default');

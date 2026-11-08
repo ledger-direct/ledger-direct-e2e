@@ -77,6 +77,13 @@ export class SpendGuard {
     return this.maxPayment ?? DEFAULT_MAX_PAYMENT_BY_ASSET[asset.toUpperCase()] ?? DEFAULT_MAX_PAYMENT;
   }
 
+  /** The cap in words, for a tool description: "50" when configured, else "50 (XAH: 5000)". */
+  describeCap(): string {
+    if (this.maxPayment !== undefined) return this.maxPayment;
+    const perAsset = Object.entries(DEFAULT_MAX_PAYMENT_BY_ASSET).map(([code, cap]) => `${code}: ${cap}`).join(', ');
+    return `${DEFAULT_MAX_PAYMENT} (${perAsset})`;
+  }
+
   /** Books a payment or refuses it; nothing is booked when it is refused. */
   charge(asset: string, amount: string): void {
     const code = asset.toUpperCase();

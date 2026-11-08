@@ -159,6 +159,8 @@ describe('what the spend guard and the runner make of Xahau', () => {
     expect(() => guard.charge('XAH', '5000.1')).toThrow(/above LD_E2E_MAX_PAYMENT \(5000\)/);
     expect(() => guard.charge('XRP', '50.5')).toThrow(/above LD_E2E_MAX_PAYMENT \(50\)/);
     expect(guard.summary().maxPayment).toBe('5000');
+    expect(guard.describeCap()).toBe('50 (XAH: 5000)');
+    expect(new SpendGuard('10').describeCap()).toBe('10');
     // A configured cap applies to every asset, as before.
     expect(() => new SpendGuard('10').charge('XAH', '11')).toThrow(/\(10\)/);
   });
