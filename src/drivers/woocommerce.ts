@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
+import { throttleKeys } from './throttle.js';
 
 export interface WooCommerceOptions {
   /** The folder with the WordPress docker-compose.yml — the one that has a WP-CLI service. */
@@ -178,8 +179,11 @@ echo json_encode(['ran' => '${HOOK}', 'synced' => $before > 0, 'checked' => $bef
   async nodeRequests(): Promise<number | null> {
     if (!this.account) return null;
     const r = (await this.wp(`<?php
-$value = get_transient('ledger_direct_ledger-direct.sync.v1.testnet.' . $args[0]);
-echo json_encode(['value' => $value === false ? null : $value]), "\\n";`, this.account)) as { value: number | string | null };
+$value = false;
+foreach (json_decode($args[0], true, 512, JSON_THROW_ON_ERROR) as $key) {
+  if ($value === false) { $value = get_transient('ledger_direct_' . $key); }
+}
+echo json_encode(['value' => $value === false ? null : $value]), "\\n";`, JSON.stringify(throttleKeys('XRPL', 'testnet', this.account)))) as { value: number | string | null };
     return r.value === null ? 0 : Number.parseInt(String(r.value), 10);
   }
 

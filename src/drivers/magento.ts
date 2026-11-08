@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
+import { throttleKeys } from './throttle.js';
 
 export interface MagentoOptions {
   /** How the shop is reached over HTTP from this machine, e.g. https://localhost:8444 */
@@ -240,8 +241,12 @@ echo json_encode(['ran' => '${CRON_JOB}']), "\\n";`);
     if (!this.account) return null;
     const r = (await this.php(`${BOOTSTRAP}
 $om->get(\\Magento\\Framework\\App\\State::class)->setAreaCode('frontend');
-$value = $om->get(\\Hardcastle\\LedgerDirect\\Model\\Cache\\RateCache::class)->get('ledger-direct.sync.v1.testnet.' . $argv[1]);
-echo json_encode(['value' => $value]), "\\n";`, this.account)) as { value: number | string | null };
+$cache = $om->get(\\Hardcastle\\LedgerDirect\\Model\\Cache\\RateCache::class);
+$value = null;
+foreach (json_decode($argv[1], true, 512, JSON_THROW_ON_ERROR) as $key) {
+  $value ??= $cache->get($key);
+}
+echo json_encode(['value' => $value]), "\\n";`, JSON.stringify(throttleKeys(this.chain, 'testnet', this.account)))) as { value: number | string | null };
     return r.value === null ? 0 : Number.parseInt(String(r.value), 10);
   }
 
