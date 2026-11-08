@@ -1,6 +1,6 @@
 import { dropsToXrp, rippleTimeToISOTime } from 'xrpl';
 import type { IncomingPayment } from '../chain.js';
-import { assetFromCurrency } from './assets.js';
+import { XRPL, type XrplProfile, assetFromCurrencyOn } from './profile.js';
 
 /**
  * Incoming payments from an `account_tx` answer (API v2 `tx_json`, v1 `tx`), newest first as
@@ -9,7 +9,7 @@ import { assetFromCurrency } from './assets.js';
  * The amount is `delivered_amount` from the metadata — what arrived, which is what a partial
  * payment or an exchange fee changes. A failed payment counts with nothing delivered.
  */
-export function parseXrplIncoming(entries: unknown[], address: string, explorerBase: string): IncomingPayment[] {
+export function parseXrplIncoming(entries: unknown[], address: string, explorerBase: string, profile: XrplProfile = XRPL): IncomingPayment[] {
   const out: IncomingPayment[] = [];
   for (const raw of entries) {
     const e = raw as { hash?: string; validated?: boolean; close_time_iso?: string; meta?: unknown; tx_json?: Record<string, unknown>; tx?: Record<string, unknown> };
@@ -20,7 +20,7 @@ export function parseXrplIncoming(entries: unknown[], address: string, explorerB
     const success = result === 'tesSUCCESS';
     const delivered = success ? meta.delivered_amount ?? meta.DeliveredAmount : undefined;
     const sent = tx.DeliverMax ?? tx.Amount;
-    const { asset, issuer, amount } = amountOf(delivered !== undefined && delivered !== 'unavailable' ? delivered : sent);
+    const { asset, issuer, amount } = amountOf(delivered !== undefined && delivered !== 'unavailable' ? delivered : sent, profile);
     const hash = String(e.hash ?? tx.hash ?? '');
     const date = typeof tx.date === 'number' ? rippleTimeToISOTime(tx.date) : undefined;
     out.push({
@@ -39,11 +39,11 @@ export function parseXrplIncoming(entries: unknown[], address: string, explorerB
   return out;
 }
 
-function amountOf(value: unknown): { asset: string; issuer?: string; amount: string } {
-  if (typeof value === 'string') return { asset: 'XRP', amount: String(dropsToXrp(value)) };
+function amountOf(value: unknown, profile: XrplProfile): { asset: string; issuer?: string; amount: string } {
+  if (typeof value === 'string') return { asset: profile.nativeAsset, amount: String(dropsToXrp(value)) };
   if (typeof value === 'object' && value !== null && 'currency' in value) {
     const v = value as { currency: string; issuer?: string; value: string; mpt_issuance_id?: string };
-    return { asset: assetFromCurrency(v.currency) ?? decodeCurrency(v.currency), issuer: v.issuer, amount: v.value };
+    return { asset: assetFromCurrencyOn(profile, v.currency) ?? decodeCurrency(v.currency), issuer: v.issuer, amount: v.value };
   }
   return { asset: '?', amount: '0' };
 }

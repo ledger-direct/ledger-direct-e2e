@@ -1,6 +1,7 @@
-import { Client, Wallet, TrustSet, TrustSetFlags } from 'xrpl';
+import { Client, Payment, Wallet, TrustSet, TrustSetFlags, type ECDSA } from 'xrpl';
 import { httpFetch } from '../../http.js';
-import { ASSETS, Asset, TESTNET_FAUCET, TESTNET_ISSUED, assetFromCurrency } from './assets.js';
+import { ASSETS, Asset, TESTNET_ISSUED } from './assets.js';
+import { XRPL, type XrplProfile, assetFromCurrencyOn } from './profile.js';
 import { submitWithRetry } from './submit.js';
 
 export interface Balances {
@@ -14,21 +15,37 @@ export interface Balances {
 const FAUCET_TIMEOUT_MS = 60_000;
 
 /**
+ * The wallet a seed stands for. A seed names its own algorithm: `sEd…` is
+ * ed25519, every other `s…` seed is secp256k1 — the XRPL and Xahau faucets
+ * hand out the latter. xrpl.js's `Wallet.fromSeed()` assumes ed25519 for a
+ * seed without the prefix and derives an address that owns nothing, which is
+ * why every seed in this harness goes through here.
+ */
+export function walletFromSeed(seed: string): Wallet {
+  // The enum's values, spelled out: xrpl.js re-exports ECDSA in a way Node's ESM loader does not see as a named export.
+  const algorithm = (seed.startsWith('sEd') ? 'ed25519' : 'ecdsa-secp256k1') as ECDSA;
+  return Wallet.fromSeed(seed, { algorithm });
+}
+
+/**
  * Asks the testnet faucet for XRP. Without a destination it creates a new
  * account and returns its seed; with one it tops up an existing account. The
  * faucet rate-limits, so callers ask for what a run needs, not for stock.
  */
-export async function faucet(destination?: string): Promise<{ address: string; seed?: string; amount: number }> {
-  const response = await httpFetch(TESTNET_FAUCET, {
+export async function faucet(destination?: string, url: string = XRPL.faucet): Promise<{ address: string; seed?: string; amount: number }> {
+  const response = await httpFetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(destination ? { destination } : {}),
   }, FAUCET_TIMEOUT_MS);
   if (!response.ok) throw new Error(`Faucet answered ${response.status} ${response.statusText}`);
-  const body = (await response.json()) as { account?: { classicAddress?: string; address?: string }; seed?: string; amount?: number; balance?: number };
+  // The XRPL faucet answers `{ account, seed, amount }`, Xahau's `{ account: { secret, … }, amount }`.
+  const body = (await response.json()) as { account?: { classicAddress?: string; address?: string; secret?: string }; seed?: string; amount?: number; balance?: number; error?: string };
+  // Xahau's faucet answers a refusal with 200 and an error field ("you must wait 36 seconds before requesting again").
+  if (body.error) throw new Error(`Faucet refused: ${body.error}`);
   const address = body.account?.classicAddress ?? body.account?.address ?? destination;
   if (!address) throw new Error('Faucet answered without an address');
-  return { address, seed: body.seed, amount: Number(body.amount ?? body.balance ?? 0) };
+  return { address, seed: body.seed ?? body.account?.secret, amount: Number(body.amount ?? body.balance ?? 0) };
 }
 
 /**
@@ -63,27 +80,47 @@ export function requireTrustlines(results: Record<string, string>): void {
   if (failed.length > 0) throw new Error(`trust line not set: ${failed.map(([asset, code]) => `${asset} ${code}`).join(', ')}`);
 }
 
-/** A brand-new funded account. `trustlines` makes it able to receive the stablecoins. */
-export async function createFresh(client: Client, options: { trustlines?: boolean } = {}): Promise<{ wallet: Wallet; trustlines: Record<string, string> }> {
-  const funded = await faucet();
-  if (!funded.seed) throw new Error('Faucet created an account but returned no seed');
-  const wallet = Wallet.fromSeed(funded.seed);
+/**
+ * A brand-new funded account. `trustlines` makes it able to receive the chain's issued
+ * assets, where it has any. Funded by the faucet, or — where the profile says so — by a
+ * payment from `funderSeed`, the chain's treasury: a new key pair, opened by the first payment.
+ */
+export async function createFresh(client: Client, options: { trustlines?: boolean; funderSeed?: string } = {}, profile: XrplProfile = XRPL): Promise<{ wallet: Wallet; trustlines: Record<string, string> }> {
+  const wallet = profile.freshAccounts === 'treasury' ? await openFromTreasury(client, options.funderSeed, profile) : await fromFaucet(profile);
   // The faucet answers before the funding transaction is validated; wait for the account to exist.
   await waitForAccount(client, wallet.classicAddress);
-  const trustlines = options.trustlines ? await setTrustlines(client, wallet) : {};
+  const trustlines = options.trustlines && Object.keys(profile.issued).length > 0 ? await setTrustlines(client, wallet) : {};
   requireTrustlines(trustlines);
   return { wallet, trustlines };
 }
 
-export async function balances(client: Client, address: string): Promise<Balances> {
+async function fromFaucet(profile: XrplProfile): Promise<Wallet> {
+  const funded = await faucet(undefined, profile.faucet);
+  if (!funded.seed) throw new Error('Faucet created an account but returned no seed');
+  return walletFromSeed(funded.seed);
+}
+
+async function openFromTreasury(client: Client, funderSeed: string | undefined, profile: XrplProfile): Promise<Wallet> {
+  if (!funderSeed) throw new Error(`${profile.chain}: a fresh account is opened by the treasury; its seed is needed (LEDGERDIRECT_TESTNET_${profile.chain}_TREASURY_SEED)`);
+  const wallet = Wallet.generate();
+  const funder = walletFromSeed(funderSeed);
+  const tx: Payment = { TransactionType: 'Payment', Account: funder.classicAddress, Destination: wallet.classicAddress, Amount: profile.freshAccountDrops };
+  const response = await submitWithRetry(client, funder, tx);
+  const meta = response.result.meta;
+  const code = typeof meta === 'object' && meta !== null && 'TransactionResult' in meta ? String(meta.TransactionResult) : 'unknown';
+  if (code !== 'tesSUCCESS') throw new Error(`opening a fresh ${profile.chain} account from the treasury failed: ${code} (${response.result.hash})`);
+  return wallet;
+}
+
+export async function balances(client: Client, address: string, profile: XrplProfile = XRPL): Promise<Balances> {
   const xrp = await client.getXrpBalance(address);
   const lines = await client.request({ command: 'account_lines', account: address });
   const tokens: Balances['tokens'] = {};
   const trustlines: Exclude<Asset, 'XRP'>[] = [];
   for (const line of lines.result.lines) {
-    const asset = assetFromCurrency(line.currency);
-    if (asset === null || asset === 'XRP') continue;
-    if (TESTNET_ISSUED[asset].issuer !== line.account) continue;
+    const asset = assetFromCurrencyOn(profile, line.currency) as Exclude<Asset, 'XRP'> | null;
+    if (asset === null || asset === profile.nativeAsset) continue;
+    if (profile.issued[asset].issuer !== line.account) continue;
     trustlines.push(asset);
     tokens[asset] = line.balance;
   }

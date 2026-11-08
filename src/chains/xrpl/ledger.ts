@@ -1,17 +1,29 @@
-import { Client, Wallet } from 'xrpl';
+import { Client } from 'xrpl';
 import type { Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from '../chain.js';
-import { ASSETS, TESTNET_EXPLORER_TX, TESTNET_ISSUED, TESTNET_WS, isAsset } from './assets.js';
 import { parseXrplIncoming } from './incoming.js';
 import { pay } from './payments.js';
+import { XRPL, type XrplProfile } from './profile.js';
 import { sweep } from './sweep.js';
-import { balances, createFresh, faucet } from './wallets.js';
+import { balances, createFresh, faucet, walletFromSeed } from './wallets.js';
 
-/** The XRP Ledger testnet behind the chain contract. */
+/**
+ * An XRPL-protocol testnet behind the chain contract: the XRP Ledger by default,
+ * Xahau with its profile. Everything below is the same code; only the profile
+ * — nodes, faucet, explorer, native asset, issued assets — tells them apart.
+ */
 export class XrplLedger implements Ledger {
-  readonly chain = 'XRPL' as const;
-  readonly nativeAsset = 'XRP';
+  readonly chain: 'XRPL' | 'XAHAU';
+  readonly nativeAsset: string;
   private client?: Client;
   private connecting?: Promise<Client>;
+
+  /**
+   * @param funderSeed the treasury's seed, for a profile whose fresh accounts the treasury opens
+   */
+  constructor(private readonly profile: XrplProfile = XRPL, private readonly funderSeed?: string) {
+    this.chain = profile.chain;
+    this.nativeAsset = profile.nativeAsset;
+  }
 
   /**
    * The client is reused across a run, but a socket that sat idle through
@@ -35,35 +47,38 @@ export class XrplLedger implements Ledger {
       this.client = undefined;
       await retireClient(stale);
     }
-    const client = new Client(TESTNET_WS);
+    const client = new Client(this.profile.ws);
     await client.connect();
     this.client = client;
     return client;
   }
 
   assets(): ChainAsset[] {
-    return ASSETS.map((code) => (code === 'XRP' ? { code, native: true } : { code, native: false, issuer: TESTNET_ISSUED[code].issuer }));
+    return [
+      { code: this.profile.nativeAsset, native: true },
+      ...Object.entries(this.profile.issued).map(([code, issued]) => ({ code, native: false, issuer: issued.issuer })),
+    ];
   }
 
   async createFresh(options: { trustlines?: boolean } = {}): Promise<FreshAccount> {
     const c = await this.connect();
-    const created = await createFresh(c, options);
+    const created = await createFresh(c, { ...options, funderSeed: this.funderSeed }, this.profile);
     return { address: created.wallet.classicAddress, seed: created.wallet.seed!, trustlines: created.trustlines };
   }
 
   async fund(address: string): Promise<{ address: string; amount: string }> {
-    const r = await faucet(address);
+    const r = await faucet(address, this.profile.faucet);
     return { address: r.address, amount: String(r.amount) };
   }
 
   async balances(address: string): Promise<Balances> {
     const c = await this.connect();
-    const b = await balances(c, address);
+    const b = await balances(c, address, this.profile);
     return { address: b.address, native: b.xrp, tokens: { ...b.tokens }, trustlines: [...b.trustlines] };
   }
 
   async pay(request: PaymentRequest): Promise<PaymentResult> {
-    if (!isAsset(request.asset)) throw new Error(`XRPL: unknown asset ${request.asset}`);
+    if (!this.assets().some((a) => a.code === request.asset)) throw new Error(`${this.chain}: unknown asset ${request.asset}`);
     const c = await this.connect();
     return pay(c, {
       seed: request.seed,
@@ -72,26 +87,26 @@ export class XrplLedger implements Ledger {
       amount: request.amount,
       asset: request.asset,
       partial: request.partial,
-    });
+    }, this.profile);
   }
 
   async sweep(seed: string, to: string): Promise<SweepResult> {
-    return sweep(await this.connect(), seed, to);
+    return sweep(await this.connect(), seed, to, undefined, this.profile);
   }
 
   async incoming(address: string, options: { identifier?: string; limit?: number } = {}): Promise<IncomingPayment[]> {
     const c = await this.connect();
     const answer = await c.request({ command: 'account_tx', account: address, limit: options.limit ?? 50, forward: false });
-    const payments = parseXrplIncoming(answer.result.transactions as unknown[], address, TESTNET_EXPLORER_TX);
+    const payments = parseXrplIncoming(answer.result.transactions as unknown[], address, this.profile.explorerTx, this.profile);
     return options.identifier === undefined ? payments : payments.filter((p) => p.identifier === options.identifier);
   }
 
   explorerUrl(hash: string): string {
-    return TESTNET_EXPLORER_TX + hash;
+    return this.profile.explorerTx + hash;
   }
 
   addressOf(seed: string): string {
-    return Wallet.fromSeed(seed).classicAddress;
+    return walletFromSeed(seed).classicAddress;
   }
 
   async close(): Promise<void> {

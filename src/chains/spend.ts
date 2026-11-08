@@ -5,7 +5,8 @@ import type { Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledg
  * catalogue (`RunContext.pay()`, so the nightly) and the MCP tools alike.
  *
  * Two limits, both in the asset's own units:
- * - LD_E2E_MAX_PAYMENT caps a single payment (default 50).
+ * - LD_E2E_MAX_PAYMENT caps a single payment (default 50; for XAH, worth about a
+ *   cent each, 5 000 — the same few euros).
  * - LD_E2E_RUN_BUDGET caps the sum per process and asset, e.g.
  *   `XRP=15,RLUSD=5,USDC=5`. Once it is set, an asset it does not name has a
  *   budget of zero: a run that pays in something nobody budgeted fails loudly.
@@ -50,27 +51,38 @@ export function parseBudget(spec: string): Map<string, bigint> {
   return budget;
 }
 
+/** The cap per payment, and the one for an asset whose unit is worth about a cent — the same few euros. */
+export const DEFAULT_MAX_PAYMENT = '50';
+export const DEFAULT_MAX_PAYMENT_BY_ASSET: Readonly<Record<string, string>> = { XAH: '5000' };
+
 export class SpendGuard {
   private readonly spentUnits = new Map<string, bigint>();
-  private readonly maxUnits: bigint;
+  private readonly maxUnits?: bigint;
 
+  /** @param maxPayment the cap for every asset; undefined keeps the defaults per asset */
   constructor(
-    readonly maxPayment: string,
+    readonly maxPayment: string | undefined,
     private readonly budget?: Map<string, bigint>,
   ) {
-    this.maxUnits = toUnits(maxPayment, 'LD_E2E_MAX_PAYMENT');
+    this.maxUnits = maxPayment === undefined ? undefined : toUnits(maxPayment, 'LD_E2E_MAX_PAYMENT');
   }
 
   static fromEnv(env: NodeJS.ProcessEnv = process.env): SpendGuard {
     const budget = env.LD_E2E_RUN_BUDGET?.trim();
-    return new SpendGuard(env.LD_E2E_MAX_PAYMENT?.trim() || '50', budget ? parseBudget(budget) : undefined);
+    return new SpendGuard(env.LD_E2E_MAX_PAYMENT?.trim() || undefined, budget ? parseBudget(budget) : undefined);
+  }
+
+  /** The cap for one asset: the configured one, else the asset's default, else the general one. */
+  maxPaymentFor(asset: string): string {
+    return this.maxPayment ?? DEFAULT_MAX_PAYMENT_BY_ASSET[asset.toUpperCase()] ?? DEFAULT_MAX_PAYMENT;
   }
 
   /** Books a payment or refuses it; nothing is booked when it is refused. */
   charge(asset: string, amount: string): void {
     const code = asset.toUpperCase();
     const units = toUnits(amount, `payment of ${asset}`);
-    if (units > this.maxUnits) throw new SpendLimitError(`refusing to pay ${amount} ${code}: above LD_E2E_MAX_PAYMENT (${this.maxPayment})`);
+    const max = this.maxUnits ?? toUnits(this.maxPaymentFor(code), 'LD_E2E_MAX_PAYMENT');
+    if (units > max) throw new SpendLimitError(`refusing to pay ${amount} ${code}: above LD_E2E_MAX_PAYMENT (${this.maxPaymentFor(code)})`);
     const spent = this.spentUnits.get(code) ?? 0n;
     if (this.budget) {
       const limit = this.budget.get(code);
@@ -86,7 +98,10 @@ export class SpendGuard {
   summary(): { spent: Record<string, string>; maxPayment: string; budget?: Record<string, string> } {
     const spent = Object.fromEntries([...this.spentUnits].map(([code, units]) => [code, fromUnits(units)]));
     const budget = this.budget ? Object.fromEntries([...this.budget].map(([code, units]) => [code, fromUnits(units)])) : undefined;
-    return { spent, maxPayment: this.maxPayment, ...(budget ? { budget } : {}) };
+    // The cap as it applied: the configured one, else the default of the one asset spent, else the general one.
+    const codes = [...this.spentUnits.keys()];
+    const maxPayment = this.maxPayment ?? (codes.length === 1 ? this.maxPaymentFor(codes[0]) : DEFAULT_MAX_PAYMENT);
+    return { spent, maxPayment, ...(budget ? { budget } : {}) };
   }
 }
 

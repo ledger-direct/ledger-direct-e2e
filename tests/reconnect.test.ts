@@ -1,15 +1,12 @@
 import type { AddressInfo } from 'node:net';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { Client } from 'xrpl';
 import { retireClient, XrplLedger } from '../src/chains/xrpl/ledger.js';
+import { XRPL } from '../src/chains/xrpl/profile.js';
 
-// XrplLedger connects to TESTNET_WS; here that is the local stand-in below.
-const target = vi.hoisted(() => ({ url: '' }));
-vi.mock('../src/chains/xrpl/assets.js', async (original) => {
-  const actual = await original<typeof import('../src/chains/xrpl/assets.js')>();
-  return { ...actual, get TESTNET_WS() { return target.url; } };
-});
+// XrplLedger connects to its profile's node; here that is the local stand-in below.
+const against = (url: string): XrplLedger => new XrplLedger({ ...XRPL, ws: url });
 
 /**
  * A local rippled stand-in: answers server_info, counts connections, and can
@@ -131,8 +128,7 @@ describe('XrplLedger.connect()', () => {
 
   it('shares a connection that is still being opened instead of aborting it', async () => {
     server = await fakeRippled();
-    target.url = server.url;
-    const ledger = new XrplLedger();
+    const ledger = against(server.url);
     const [a, b] = await Promise.all([ledger.connect(), ledger.connect()]);
     expect(a).toBe(b);
     expect(a.isConnected()).toBe(true);
@@ -142,8 +138,7 @@ describe('XrplLedger.connect()', () => {
 
   it('replaces a client whose connection went away', async () => {
     server = await fakeRippled();
-    target.url = server.url;
-    const ledger = new XrplLedger();
+    const ledger = against(server.url);
     const first = await ledger.connect();
     server.dropAll();
     for (let i = 0; i < 100 && first.isConnected(); i++) await wait(10);

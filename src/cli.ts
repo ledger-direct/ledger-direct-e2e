@@ -3,12 +3,14 @@ import { readFile } from 'node:fs/promises';
 import { Command } from 'commander';
 import { Wallet } from 'xrpl';
 import { CASES, findCase } from './cases/catalogue.js';
+import type { ChainId } from './chains/chain.js';
 import { CHAINS, isAccountOf, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
 import { TESTNET_ISSUED, assetFromCurrency, isAsset } from './chains/xrpl/assets.js';
 import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { ensureTreasury, isAccountNotFound, type Stablecoin } from './chains/xrpl/ensure.js';
-import { balances as xrplBalances, faucet, requireTrustlines, setTrustlines } from './chains/xrpl/wallets.js';
+import { XAHAU } from './chains/xrpl/profile.js';
+import { balances as xrplBalances, faucet, requireTrustlines, setTrustlines, walletFromSeed } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
 import { TRY_PRESETS, tryShopAccount, type TrySelection } from './drivers/try.js';
@@ -21,7 +23,7 @@ import { resolveCaseIds, runCases } from './runner/run.js';
 const program = new Command();
 program
   .name('ld-e2e')
-  .description('LedgerDirect end-to-end harness — testnet wallets, payments, and the PS-01…PS-12 catalogue, on XRPL and Stellar')
+  .description('LedgerDirect end-to-end harness — testnet wallets, payments, and the PS-01…PS-12 catalogue, on XRPL, Stellar and Xahau')
   .option('--json', 'machine-readable output')
   .option('--chain <chain>', `chain to operate on: ${CHAINS.join(' | ')}`, 'XRPL')
   .version('0.1.0');
@@ -31,10 +33,10 @@ function out(data: unknown, human: () => string): void {
   process.stdout.write((json ? JSON.stringify(data, null, 2) : human()) + '\n');
 }
 
-function chain(): 'XRPL' | 'STELLAR' {
+function chain(): ChainId {
   const value = String(program.opts().chain);
   if (!isChain(value)) throw new Error(`unknown chain ${value}; known: ${CHAINS.join(', ')}`);
-  return value.toUpperCase() as 'XRPL' | 'STELLAR';
+  return value.toUpperCase() as ChainId;
 }
 
 const wallet = program.command('wallet').description('testnet wallets: treasury, fresh receiving accounts, top-ups');
@@ -99,7 +101,7 @@ wallet
   .option('--seed-env <variable>', 'environment variable holding the seed', 'LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED')
   .action(async (opts: { rlusd?: string; usdc?: string; maxXrp: string; seedEnv: string }) => {
     if (chain() !== 'XRPL') throw new Error('top-up via DEX exists for XRPL only; on Stellar issue a test asset or use a faucet');
-    const w = Wallet.fromSeed(requireSeed(opts.seedEnv));
+    const w = walletFromSeed(requireSeed(opts.seedEnv));
     const results = await withClient(async (c) => {
       const r: Record<string, unknown> = {};
       // A real limit first: a line a filled offer creates has limit 0, and a run's sweep
@@ -116,15 +118,16 @@ wallet
 
 wallet
   .command('ensure')
-  .description('XRPL: bring the treasury up to the minimums a run needs (XRP from the faucet, stablecoins from the DEX), or fail naming the shortfall')
-  .option('--xrp <value>', 'XRP at least', '50')
+  .description('XRPL, Xahau: bring the treasury up to the minimums a run needs (the native asset from the faucet, on XRPL the stablecoins from the DEX), or fail naming the shortfall')
+  .option('--xrp <value>', 'XRP at least (XAH on Xahau)', '50')
   .option('--rlusd <value>', 'RLUSD at least', '10')
   .option('--usdc <value>', 'USDC at least', '10')
   .option('--max-xrp <value>', 'XRP to spend per stablecoin purchase at most', '50')
   .option('--seed-env <variable>', 'environment variable holding the seed', 'LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED')
   .action(async (opts: { xrp: string; rlusd: string; usdc: string; maxXrp: string; seedEnv: string }) => {
-    if (chain() !== 'XRPL') throw new Error('ensure exists for XRPL only');
-    const w = Wallet.fromSeed(requireSeed(opts.seedEnv));
+    if (chain() === 'STELLAR') throw new Error('ensure exists for XRPL and Xahau; on Stellar, Friendbot funds the treasury (wallet fund)');
+    if (chain() === 'XAHAU') return ensureXahau(opts);
+    const w = walletFromSeed(requireSeed(opts.seedEnv));
     const minimums = { xrp: Number(opts.xrp), tokens: { RLUSD: Number(opts.rlusd), USDC: Number(opts.usdc) } };
     for (const [name, value] of [['--xrp', minimums.xrp], ['--rlusd', minimums.tokens.RLUSD], ['--usdc', minimums.tokens.USDC]] as const) {
       if (!Number.isFinite(value) || value < 0) throw new Error(`${name}: "${value}" is not a non-negative number`);
@@ -168,6 +171,35 @@ wallet
     });
   });
 
+/**
+ * Xahau's treasury holds XAH alone, and the faucet is its only source (1 000 XAH a request, one a
+ * minute per address): the same loop as on XRPL, with nothing to buy and no lines to repair.
+ */
+async function ensureXahau(opts: { xrp: string; seedEnv: string }): Promise<void> {
+  const seedEnv = opts.seedEnv === 'LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED' ? treasurySeedVariable('XAHAU') : opts.seedEnv;
+  const w = walletFromSeed(requireSeed(seedEnv));
+  const minimums = { xrp: Number(opts.xrp), tokens: {} };
+  if (!Number.isFinite(minimums.xrp) || minimums.xrp < 0) throw new Error(`--xrp: "${opts.xrp}" is not a non-negative number`);
+  const result = await withClient((c) =>
+    ensureTreasury(minimums, {
+      read: async () => {
+        try {
+          return { xrp: Number((await xrplBalances(c, w.classicAddress, XAHAU)).xrp), tokens: {} };
+        } catch (error) {
+          if (isAccountNotFound(error)) return { xrp: 0, tokens: {} };
+          throw error;
+        }
+      },
+      fund: async () => void (await faucet(w.classicAddress, XAHAU.faucet)),
+      lineLimits: async () => ({}),
+      setLine: async () => undefined,
+      buy: async () => 'nothing to buy on Xahau',
+      pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+      log: (line) => process.stderr.write(line + '\n'),
+    }), XAHAU.ws);
+  out(result, () => (result.actions.length === 0 ? `treasury above its minimum: XAH ${result.after.xrp}` : `treasury topped up (${result.actions.join('; ')}): XAH ${result.before.xrp} → XAH ${result.after.xrp}`));
+}
+
 wallet
   .command('book <asset>')
   .description('XRPL: the best DEX offers selling RLUSD or USDC for XRP')
@@ -182,7 +214,7 @@ program
   .description('send one payment the way a customer wallet would: exact displayed amount, payment identifier, chosen asset')
   .requiredOption('--to <address>', 'receiving account shown on the payment page')
   .requiredOption('--amount <decimal>', 'the amount exactly as the page displays it')
-  .option('--id <identifier>', 'destination tag (XRPL) or memo id (Stellar) shown on the payment page')
+  .option('--id <identifier>', 'destination tag (XRPL, Xahau) or memo id (Stellar) shown on the payment page')
   .option('--tag <number>', 'alias of --id')
   .option('--asset <code>', 'asset to send; the native one by default (send another one than quoted to produce PS-04)')
   .option('--partial', 'XRPL: tfPartialPayment', false)

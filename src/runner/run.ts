@@ -33,12 +33,17 @@ export async function runCases(options: RunOptions): Promise<Report> {
   const ledger = options.ledger;
   const startedAt = new Date().toISOString();
 
-  /** The skip result for a case that is not this platform's, null for one that is (or an unknown id). */
+  /** The skip result for a case that is not this platform's or this chain's, null for one that is (or an unknown id). */
   const notApplicable = (id: string): CaseResult | null => {
     const spec = findCase(id);
-    if (!spec || appliesTo(spec, options.driver.name)) return null;
-    const only = spec.targets?.join(', ') ?? '';
-    return { id, title: spec.title, target: options.driver.name, outcome: 'skip', reason: `not a case for ${options.driver.name} (${only} only)`, startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] };
+    if (!spec) return null;
+    const skip = (reason: string): CaseResult => ({ id, title: spec.title, target: options.driver.name, outcome: 'skip', reason, startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] });
+    if (!appliesTo(spec, options.driver.name)) return skip(`not a case for ${options.driver.name} (${spec.targets?.join(', ') ?? ''} only)`);
+    const issued = ledger.assets().filter((a) => !a.native).length;
+    if (spec.needsIssuedAssets !== undefined && issued < spec.needsIssuedAssets) {
+      return skip(`needs ${spec.needsIssuedAssets} issued assets on ${ledger.chain}, which has ${issued}`);
+    }
+    return null;
   };
 
   // Nothing of the selection is this platform's: no seed, no account, no configure — the shop
