@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
+import { chainForAsset } from './chains.js';
 import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
@@ -42,6 +43,9 @@ function methodIdFor(chain: string, asset: string): string {
 
 /** The issued assets a chain's configuration card has a toggle for (`xrplIsRlusdEnabled`, `stellarIsUsdcEnabled`, …). */
 const TOGGLED_ASSETS: Record<string, string[]> = { XRPL: ['RLUSD', 'USDC'], STELLAR: ['USDC', 'EURC'], XAHAU: [] };
+
+/** Every asset a chain has a payment method for: the native one and the toggled ones. */
+const ASSETS_BY_CHAIN: Record<string, string[]> = { XRPL: ['XRP', ...TOGGLED_ASSETS.XRPL], STELLAR: ['XLM', ...TOGGLED_ASSETS.STELLAR], XAHAU: ['XAH'] };
 
 const capitalise = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
 
@@ -112,7 +116,7 @@ export class ShopwareDriver implements Driver {
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const paymentMethodId = methodIdFor(this.chain, asset);
+    const paymentMethodId = methodIdFor(chainForAsset(this.chain, asset, ASSETS_BY_CHAIN), asset);
     const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     const storefrontUrl = await this.salesChannelUrl();
 

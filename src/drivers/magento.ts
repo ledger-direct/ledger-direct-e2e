@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
+import { chainForAsset } from './chains.js';
 import { throttleKeys } from './throttle.js';
 
 export interface MagentoOptions {
@@ -132,8 +133,8 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const method = PAYMENT_METHODS[this.chain]?.[asset];
-    if (!method) throw new Error(`Magento: no payment method for ${asset} on ${this.chain}`);
+    const chain = chainForAsset(this.chain, asset, Object.fromEntries(Object.entries(PAYMENT_METHODS).map(([c, m]) => [c, Object.keys(m)])));
+    const method = PAYMENT_METHODS[chain][asset];
     const sku = options.productId ?? this.testProductSku ?? (await this.ensureTestProduct());
 
     // A guest, every time: the catalogue's PS-06 is the rule, not the exception.
