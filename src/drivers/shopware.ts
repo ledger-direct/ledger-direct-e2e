@@ -234,7 +234,7 @@ export class ShopwareDriver implements Driver {
     const container = this.options.container ?? 'shopware6_672-shopware-1';
     const sql = stellarForm
       ? `SELECT DISTINCT hash FROM ledger_direct_stellar_payment WHERE destination = '${destinationAccount}' AND memo_id = ${paymentIdentifier}`
-      : `SELECT hash FROM ledger_direct_${(chain ?? this.chain) === 'XAHAU' ? 'xahau' : 'xrpl'}_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
+      : `SELECT hash FROM ledger_direct_${(chain ?? this.chain).toUpperCase() === 'XAHAU' ? 'xahau' : 'xrpl'}_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
     const { stdout } = await run('docker', ['exec', container, 'bash', '-lc', `mysql -h 127.0.0.1 -u root -proot shopware -N -e "${sql}" 2>/dev/null`]);
     return stdout.split('\n').map((l) => l.trim()).filter((l) => l !== '');
   }

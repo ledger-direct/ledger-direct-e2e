@@ -323,8 +323,9 @@ echo json_encode([
   }
 
   async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
-    const repository = TRANSACTION_REPOSITORY[chain ?? this.chain];
-    if (!repository) throw new Error(`Magento: no transaction repository on ${chain ?? this.chain}`);
+    const resolved = (chain ?? this.chain).toUpperCase();
+    const repository = TRANSACTION_REPOSITORY[resolved];
+    if (!repository) throw new Error(`Magento: no transaction repository on ${resolved}`);
     const answer = (await this.php(`${BOOTSTRAP}
 $transactions = $om->get('${repository}')->findTransactions($argv[1], (int) $argv[2]);
 echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier)) as { hashes?: string[] };
