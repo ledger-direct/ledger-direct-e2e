@@ -30,6 +30,12 @@ export interface OrderOptions {
   /** A product from findProducts(); the driver's cheap test article when absent. */
   productId?: string;
   quantity?: number;
+  /**
+   * The chain the order is for. Without it, the chain configure() pointed the shop at, or the
+   * chain that has the asset when that one does not (a session places orders without
+   * configuring; XAH names Xahau on its own, USDC exists on two chains).
+   */
+  chain?: string;
 }
 
 export interface PlacedOrder {
@@ -37,6 +43,8 @@ export interface PlacedOrder {
   reference: string;
   /** The per-order secret the platform uses instead of a login (secure_key, deepLinkCode, …). */
   secret: string;
+  /** The chain the order was placed on, as the driver resolved it (OrderOptions.chain or the asset's). */
+  chain?: string;
 }
 
 export interface PaymentPageView {
@@ -112,7 +120,7 @@ export interface Driver {
    * identifier — what the merchant can see in the order panel. How PS-11 proves that a
    * payment on a cancelled order is on record once the safety net has run.
    */
-  recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]>;
+  recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]>;
   /**
    * A value that changes exactly when the platform synced with the node — how PS-08 is
    * proven. Null when the platform cannot expose it; the case then falls back to timing.

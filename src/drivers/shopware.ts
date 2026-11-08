@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
+import { orderChain } from './chains.js';
 import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
@@ -42,6 +43,9 @@ function methodIdFor(chain: string, asset: string): string {
 
 /** The issued assets a chain's configuration card has a toggle for (`xrplIsRlusdEnabled`, `stellarIsUsdcEnabled`, …). */
 const TOGGLED_ASSETS: Record<string, string[]> = { XRPL: ['RLUSD', 'USDC'], STELLAR: ['USDC', 'EURC'], XAHAU: [] };
+
+/** Every asset a chain has a payment method for: the native one and the toggled ones. */
+const ASSETS_BY_CHAIN: Record<string, string[]> = { XRPL: ['XRP', ...TOGGLED_ASSETS.XRPL], STELLAR: ['XLM', ...TOGGLED_ASSETS.STELLAR], XAHAU: ['XAH'] };
 
 const capitalise = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
 
@@ -112,7 +116,8 @@ export class ShopwareDriver implements Driver {
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const paymentMethodId = methodIdFor(this.chain, asset);
+    const chain = orderChain(options.chain, this.chain, asset, ASSETS_BY_CHAIN);
+    const paymentMethodId = methodIdFor(chain, asset);
     const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     const storefrontUrl = await this.salesChannelUrl();
 
@@ -144,7 +149,7 @@ export class ShopwareDriver implements Driver {
     // handle-payment answers a relative URL; the returnUrl inside it carries Shopware's payment token.
     const returnUrl = payment.redirectUrl ? new URL(payment.redirectUrl, this.options.baseUrl).searchParams.get('returnUrl') ?? '' : '';
     this.secretOf.set(order.id, { deepLinkCode: order.deepLinkCode, returnUrl, asset });
-    return { id: order.id, reference: order.orderNumber, secret: order.deepLinkCode };
+    return { id: order.id, reference: order.orderNumber, secret: order.deepLinkCode, chain };
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
@@ -220,7 +225,7 @@ export class ShopwareDriver implements Driver {
    * payment table by memo id. The chain is the one configure() pointed the shop at — an
    * r-address alone does not say whether it is the XRP Ledger's or Xahau's.
    */
-  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
     const xrplForm = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(destinationAccount);
     const stellarForm = /^G[A-Z2-7]{55}$/.test(destinationAccount);
     if (!(xrplForm || stellarForm) || !/^\d+$/.test(paymentIdentifier)) {
@@ -229,7 +234,7 @@ export class ShopwareDriver implements Driver {
     const container = this.options.container ?? 'shopware6_672-shopware-1';
     const sql = stellarForm
       ? `SELECT DISTINCT hash FROM ledger_direct_stellar_payment WHERE destination = '${destinationAccount}' AND memo_id = ${paymentIdentifier}`
-      : `SELECT hash FROM ledger_direct_${this.chain === 'XAHAU' ? 'xahau' : 'xrpl'}_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
+      : `SELECT hash FROM ledger_direct_${(chain ?? this.chain).toUpperCase() === 'XAHAU' ? 'xahau' : 'xrpl'}_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
     const { stdout } = await run('docker', ['exec', container, 'bash', '-lc', `mysql -h 127.0.0.1 -u root -proot shopware -N -e "${sql}" 2>/dev/null`]);
     return stdout.split('\n').map((l) => l.trim()).filter((l) => l !== '');
   }

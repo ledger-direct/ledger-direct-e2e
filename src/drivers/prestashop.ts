@@ -3,6 +3,7 @@ import { promisify } from 'node:util';
 import { assertComposeDir, explainComposeError } from './compose.js';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
+import { orderChain } from './chains.js';
 import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
@@ -23,16 +24,25 @@ export interface PrestaShopOptions {
  * the platform and not what the catalogue tests. Everything a customer does is
  * HTTP: the payment page, the poll, the cron.
  */
+/** Every asset a chain has a payment option for; the asset's chain when configure() has not run. */
+const ASSETS_BY_CHAIN: Record<string, string[]> = { XRPL: ['XRP', 'RLUSD', 'USDC'], XAHAU: ['XAH'] };
+
 export class PrestaShopDriver implements Driver {
   readonly name = 'prestashop' as const;
 
   private cronUrl?: string;
   private composeChecked = false;
+  /** The chain configure() last pointed the shop at; XRPL until then. The helper (module 0.6.0) takes it on every command. */
+  private chain = 'XRPL';
 
   constructor(private readonly options: PrestaShopOptions) {}
 
   async configure(config: ShopConfig): Promise<void> {
+    const chain = (config.chain || 'XRPL').toUpperCase();
+    if (chain !== 'XRPL') await this.requireChainAwareHelper(chain);
+    this.chain = chain;
     const r = (await this.helper('configure', {
+      chain: this.chain,
       account: config.destinationAccount,
       network: config.network,
       assets: config.assets.join(','),
@@ -47,12 +57,13 @@ export class PrestaShopDriver implements Driver {
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder & { pollUrl: string; pageUrl: string; cronUrl: string }> {
-    const args: Record<string, string> = { asset };
+    const chain = orderChain(options.chain, this.chain, asset, ASSETS_BY_CHAIN);
+    const args: Record<string, string> = { chain, asset };
     if (options.productId) args.product = options.productId;
     if (options.quantity) args.quantity = String(options.quantity);
     const r = (await this.helper('create-order', args)) as { id_order: number; reference: string; key: string; page: string; poll: string; cron: string };
     this.cronUrl = this.rebase(r.cron);
-    return { id: String(r.id_order), reference: r.reference, secret: r.key, pollUrl: this.rebase(r.poll), pageUrl: this.rebase(r.page), cronUrl: this.cronUrl };
+    return { id: String(r.id_order), reference: r.reference, secret: r.key, chain, pollUrl: this.rebase(r.poll), pageUrl: this.rebase(r.page), cronUrl: this.cronUrl };
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
@@ -102,14 +113,26 @@ export class PrestaShopDriver implements Driver {
     return response.json();
   }
 
+  /**
+   * A helper from before module 0.6.0 ignores `--chain` and would write a Xahau account into
+   * the XRP Ledger's settings. `sync-marker` is read-only and echoes the key it looked at: the
+   * chain-aware helper names the chain in it (core 0.11 key), the old one does not.
+   */
+  private async requireChainAwareHelper(chain: string): Promise<void> {
+    const r = (await this.helper('sync-marker', { chain })) as { key?: string };
+    if (!r.key?.startsWith(`ledger-direct.sync.v2.${chain.toLowerCase()}.`)) {
+      throw new Error(`PrestaShop: the shop's helper does not know chain ${chain} (module older than 0.6.0); nothing was configured`);
+    }
+  }
+
   /** The throttle mark's stored value: it changes exactly when a sync ran. */
   async nodeRequests(): Promise<number | null> {
-    const r = (await this.helper('sync-marker', {})) as { value: string | null };
+    const r = (await this.helper('sync-marker', { chain: this.chain })) as { value: string | null };
     return r.value === null ? 0 : Number.parseInt(r.value, 10);
   }
 
-  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
-    const answer = (await this.helper('transactions', { account: destinationAccount, tag: paymentIdentifier })) as { hashes?: string[] };
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
+    const answer = (await this.helper('transactions', { chain: chain ?? this.chain, account: destinationAccount, tag: paymentIdentifier })) as { hashes?: string[] };
     // A helper without the command answers with its command list; that is not "nothing on record".
     if (!Array.isArray(answer.hashes)) throw new Error('the shop helper does not know "transactions" (module older than PrestaShop #31?)');
     return answer.hashes;

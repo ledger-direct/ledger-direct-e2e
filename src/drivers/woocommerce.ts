@@ -2,6 +2,8 @@ import { spawn } from 'node:child_process';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
+import { orderChain } from './chains.js';
+import { throttleKeys } from './throttle.js';
 
 export interface WooCommerceOptions {
   /** The folder with the WordPress docker-compose.yml — the one that has a WP-CLI service. */
@@ -21,7 +23,37 @@ export interface WooCommerceOptions {
 const SETTINGS_OPTION = 'woocommerce_ledger-direct_settings';
 const GATEWAY_ID = 'ledger-direct';
 const HOOK = 'ledger_direct_settle_pending_orders';
-const PAYMENT_TYPES: Record<string, string> = { XRP: 'xrp', RLUSD: 'rlusd', USDC: 'usdc' };
+/** The gateway's payment type (`ledger_direct_payment_type`) per chain and asset (plugin 1.5.0 for Xahau). */
+const PAYMENT_TYPES: Record<string, Record<string, string>> = {
+  XRPL: { XRP: 'xrp', RLUSD: 'rlusd', USDC: 'usdc' },
+  XAHAU: { XAH: 'xah' },
+};
+const ASSETS_BY_CHAIN = Object.fromEntries(Object.entries(PAYMENT_TYPES).map(([c, m]) => [c, Object.keys(m)]));
+
+/**
+ * The gateway settings a ShopConfig means: the chain's own keys (`xrpl_*` for the XRP Ledger,
+ * `xahau_*` for Xahau, which also has a switch of its own), the quote expiry in minutes, one
+ * minute at least. The other chain's keys are not touched.
+ */
+export function woocommerceSettings(config: ShopConfig): { chain: string; settings: Record<string, string | number> } {
+  const chain = (config.chain || 'XRPL').toUpperCase();
+  if (!PAYMENT_TYPES[chain]) throw new Error(`WooCommerce: no payment types on ${chain}`);
+  const minutes = Math.max(1, Math.round(config.quoteExpirySeconds / 60));
+  const settings: Record<string, string | number> = { enabled: 'yes', xrpl_quote_expiry: minutes };
+  if (chain === 'XRPL') {
+    settings.xrpl_network = 'testnet';
+    settings.xrpl_testnet_destination_account = config.destinationAccount;
+    settings.xrpl_is_rlusd_enabled = config.assets.includes('RLUSD') ? 'yes' : 'no';
+    settings.xrpl_is_usdc_enabled = config.assets.includes('USDC') ? 'yes' : 'no';
+  } else {
+    const prefix = chain.toLowerCase();
+    // The chain is on exactly when one of its assets is asked for, like the XRPL asset switches above.
+    settings[`${prefix}_enabled`] = config.assets.some((asset) => PAYMENT_TYPES[chain][asset] !== undefined) ? 'yes' : 'no';
+    settings[`${prefix}_network`] = 'testnet';
+    settings[`${prefix}_testnet_destination_account`] = config.destinationAccount;
+  }
+  return { chain, settings };
+}
 
 /**
  * In WooCommerce the order key is the identifier: the payment page and the
@@ -47,27 +79,21 @@ export class WooCommerceDriver implements Driver {
   readonly name = 'woocommerce' as const;
 
   private account?: string;
+  /** The chain configure() last pointed the shop at; XRPL until then. */
+  private chain = 'XRPL';
   private testProductId?: string;
   private readonly assetOf = new Map<string, string>();
 
   constructor(private readonly options: WooCommerceOptions) {}
 
   async configure(config: ShopConfig): Promise<void> {
-    // The plugin keeps the quote expiry in minutes, one minute at least.
-    const minutes = Math.max(1, Math.round(config.quoteExpirySeconds / 60));
+    const { chain, settings } = woocommerceSettings(config);
     await this.wp(`<?php
-[$account, $assets, $minutes] = [$args[0], explode(',', $args[1]), (int) $args[2]];
 $settings = get_option('${SETTINGS_OPTION}', []);
-$settings = array_merge(is_array($settings) ? $settings : [], [
-  'enabled' => 'yes',
-  'xrpl_network' => 'testnet',
-  'xrpl_testnet_destination_account' => $account,
-  'xrpl_is_rlusd_enabled' => in_array('RLUSD', $assets, true) ? 'yes' : 'no',
-  'xrpl_is_usdc_enabled' => in_array('USDC', $assets, true) ? 'yes' : 'no',
-  'xrpl_quote_expiry' => $minutes,
-]);
+$settings = array_merge(is_array($settings) ? $settings : [], json_decode($args[0], true, 512, JSON_THROW_ON_ERROR));
 update_option('${SETTINGS_OPTION}', $settings);
-echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.assets.join(','), String(minutes));
+echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
+    this.chain = chain;
     this.account = config.destinationAccount;
     await this.ensureTestProduct();
   }
@@ -82,8 +108,8 @@ echo json_encode(['currency' => get_woocommerce_currency(), 'products' => array_
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const paymentType = PAYMENT_TYPES[asset];
-    if (!paymentType) throw new Error(`WooCommerce: no payment type for ${asset}`);
+    const chain = orderChain(options.chain, this.chain, asset, ASSETS_BY_CHAIN);
+    const paymentType = PAYMENT_TYPES[chain][asset];
     const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     // A guest, every time: the catalogue's PS-06 is the rule, not the exception.
     const r = (await this.wp(`<?php
@@ -101,7 +127,7 @@ $order->save();
 echo json_encode(['id' => $order->get_id(), 'number' => $order->get_order_number(), 'key' => $order->get_order_key()]), "\\n";`, paymentType, productId, String(options.quantity ?? 1))) as { id: number; number: string; key: string };
     const id = String(r.id);
     this.assetOf.set(id, asset);
-    return { id, reference: r.number, secret: r.key };
+    return { id, reference: r.number, secret: r.key, chain };
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
@@ -178,8 +204,11 @@ echo json_encode(['ran' => '${HOOK}', 'synced' => $before > 0, 'checked' => $bef
   async nodeRequests(): Promise<number | null> {
     if (!this.account) return null;
     const r = (await this.wp(`<?php
-$value = get_transient('ledger_direct_ledger-direct.sync.v1.testnet.' . $args[0]);
-echo json_encode(['value' => $value === false ? null : $value]), "\\n";`, this.account)) as { value: number | string | null };
+$value = false;
+foreach (json_decode($args[0], true, 512, JSON_THROW_ON_ERROR) as $key) {
+  if ($value === false) { $value = get_transient('ledger_direct_' . $key); }
+}
+echo json_encode(['value' => $value === false ? null : $value]), "\\n";`, JSON.stringify(throttleKeys(this.chain, 'testnet', this.account)))) as { value: number | string | null };
     return r.value === null ? 0 : Number.parseInt(String(r.value), 10);
   }
 
@@ -237,10 +266,11 @@ echo json_encode(['id' => $id]), "\\n";`, sku)) as { id: number };
     return (this.testProductId = String(r.id));
   }
 
-  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
     const answer = (await this.wp(`<?php
-$transactions = \\Hardcastle\\LedgerDirect\\Service\\ServiceFactory::getInstance()->getSyncService()->findTransactions($args[0], (int) $args[1]);
-echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier)) as { hashes?: string[] };
+// The chain's sync service (plugin 1.5.0 takes the chain; an older plugin ignores the argument and answers for the XRP Ledger).
+$transactions = \\Hardcastle\\LedgerDirect\\Service\\ServiceFactory::getInstance()->getSyncService($args[2])->findTransactions($args[0], (int) $args[1]);
+echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier, chain ?? this.chain)) as { hashes?: string[] };
     return answer.hashes ?? [];
   }
 

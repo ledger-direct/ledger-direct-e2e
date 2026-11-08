@@ -80,11 +80,13 @@ export class ShopSession {
 
   async placeOrder(target: string, asset: string, options: OrderOptions & { chain?: ChainId } = {}): Promise<{ entry: SessionOrder; page: PaymentPageView }> {
     const d = this.driver(target);
-    const order = await d.placeOrder(asset, { productId: options.productId, quantity: options.quantity });
+    const order = await d.placeOrder(asset, { productId: options.productId, quantity: options.quantity, chain: options.chain });
     const page = await d.paymentPage(order);
     const clash = this.orders.get(order.id);
     const key = clash && clash.target !== target ? `${target}:${order.id}` : order.id;
-    const entry: SessionOrder = { key, order, target, asset, chain: options.chain ?? 'XRPL', placedAt: new Date().toISOString() };
+    // The chain the driver placed the order on: the one asked for, else the asset's; XRPL for a driver that does not say.
+    const chain = (options.chain ?? order.chain ?? 'XRPL') as ChainId;
+    const entry: SessionOrder = { key, order, target, asset, chain, placedAt: new Date().toISOString() };
     this.orders.set(key, entry);
     return { entry, page };
   }
@@ -121,7 +123,8 @@ export class ShopSession {
   }
 
   recordedHashes(key: string, page: Pick<PaymentPageView, 'destinationAccount' | 'paymentIdentifier'>): Promise<string[]> {
-    return this.driver(this.get(key).target).recordedHashes(page.destinationAccount, page.paymentIdentifier);
+    const e = this.get(key);
+    return this.driver(e.target).recordedHashes(page.destinationAccount, page.paymentIdentifier, e.chain);
   }
 
   /** Reads the page and pays what it asks for (or half, or the shortfall, or another asset) from the chain treasury. */
