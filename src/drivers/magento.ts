@@ -25,10 +25,16 @@ export interface MagentoOptions {
   allowSelfSigned?: boolean;
 }
 
-const PAYMENT_METHODS: Record<string, string> = {
-  XRP: 'xrp_payment',
-  RLUSD: 'xrpl_rlusd_payment',
-  USDC: 'xrpl_usdc_payment',
+/** Magento's method code per chain and asset: one payment method per catalogue asset (module 1.2.0 for Xahau). */
+const PAYMENT_METHODS: Record<string, Record<string, string>> = {
+  XRPL: { XRP: 'xrp_payment', RLUSD: 'xrpl_rlusd_payment', USDC: 'xrpl_usdc_payment' },
+  XAHAU: { XAH: 'xahau_xah_payment' },
+};
+
+/** The module's transaction repository per chain, as etc/di.xml names it; Xahau's is a virtual type. */
+const TRANSACTION_REPOSITORY: Record<string, string> = {
+  XRPL: 'Hardcastle\\LedgerDirect\\Port\\MagentoXrplTransactionRepository',
+  XAHAU: 'Hardcastle\\LedgerDirect\\Xahau\\TransactionRepository',
 };
 const CRON_JOB = 'ledger_direct_settle_pending_orders';
 const SYSTEM_LOG = '/var/www/html/var/log/system.log';
@@ -39,6 +45,28 @@ const BOOTSTRAP = `<?php
 require '/var/www/html/app/bootstrap.php';
 $om = \\Magento\\Framework\\App\\Bootstrap::create(BP, $_SERVER)->getObjectManager();
 `;
+
+/**
+ * The store configuration a ShopConfig means in Magento: the chain's group holds its testnet
+ * switch and account (`ledger_direct` for the XRP Ledger, `ledger_direct_<chain>` for every
+ * other), the quote validity is global, and each payment method of the chain is on exactly when
+ * its asset is asked for. The other chains' methods are not touched.
+ */
+export function magentoSettings(config: ShopConfig): { chain: string; settings: Record<string, string | number> } {
+  const chain = (config.chain || 'XRPL').toUpperCase();
+  const methods = PAYMENT_METHODS[chain];
+  if (!methods) throw new Error(`Magento: no payment methods on ${chain}`);
+  const group = chain === 'XRPL' ? 'payment/ledger_direct' : `payment/ledger_direct_${chain.toLowerCase()}`;
+  const settings: Record<string, string | number> = {
+    [`${group}/use_testnet`]: 1,
+    [`${group}/${chain.toLowerCase()}_testnet_account`]: config.destinationAccount,
+    'payment/ledger_direct/quote_expiry': config.quoteExpirySeconds,
+  };
+  for (const [asset, method] of Object.entries(methods)) {
+    settings[`payment/${method}/active`] = config.assets.includes(asset) ? 1 : 0;
+  }
+  return { chain, settings };
+}
 
 /**
  * Magento 2. Orders go through the REST API the way a headless storefront
@@ -52,6 +80,8 @@ export class MagentoDriver implements Driver {
 
   private adminToken?: string;
   private account?: string;
+  /** The chain configure() last pointed the shop at; XRPL until then. */
+  private chain = 'XRPL';
   private currency?: string;
   private testProductSku?: string;
   private readonly assetOf = new Map<string, string>();
@@ -64,24 +94,23 @@ export class MagentoDriver implements Driver {
     }
   }
 
+  /**
+   * The chain's group holds its testnet switch and accounts (`ledger_direct` for the XRP Ledger,
+   * `ledger_direct_<chain>` for every other); the quote validity is global. Every payment method
+   * of the chain is switched on or off by the assets asked for; the other chains' methods are
+   * left as they are.
+   */
   async configure(config: ShopConfig): Promise<void> {
+    const { chain, settings } = magentoSettings(config);
     await this.php(`${BOOTSTRAP}
 $om->get(\\Magento\\Framework\\App\\State::class)->setAreaCode('adminhtml');
-[$script, $account, $assets, $expiry] = $argv;
-$assets = explode(',', $assets);
 $writer = $om->get(\\Magento\\Framework\\App\\Config\\Storage\\WriterInterface::class);
-foreach ([
-  'payment/ledger_direct/use_testnet' => 1,
-  'payment/ledger_direct/xrpl_testnet_account' => $account,
-  'payment/ledger_direct/quote_expiry' => (int) $expiry,
-  'payment/xrp_payment/active' => 1,
-  'payment/xrpl_rlusd_payment/active' => in_array('RLUSD', $assets, true) ? 1 : 0,
-  'payment/xrpl_usdc_payment/active' => in_array('USDC', $assets, true) ? 1 : 0,
-] as $path => $value) {
+foreach (json_decode($argv[1], true, 512, JSON_THROW_ON_ERROR) as $path => $value) {
   $writer->save($path, $value);
 }
 $om->get(\\Magento\\Framework\\App\\Cache\\TypeListInterface::class)->cleanType('config');
-echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.assets.join(','), String(config.quoteExpirySeconds));
+echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
+    this.chain = chain;
     this.account = config.destinationAccount;
     await this.ensureTestProduct();
   }
@@ -102,8 +131,8 @@ echo json_encode(['ok' => true]), "\\n";`, config.destinationAccount, config.ass
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const method = PAYMENT_METHODS[asset];
-    if (!method) throw new Error(`Magento: no payment method for ${asset}`);
+    const method = PAYMENT_METHODS[this.chain]?.[asset];
+    if (!method) throw new Error(`Magento: no payment method for ${asset} on ${this.chain}`);
     const sku = options.productId ?? this.testProductSku ?? (await this.ensureTestProduct());
 
     // A guest, every time: the catalogue's PS-06 is the rule, not the exception.
@@ -289,7 +318,7 @@ echo json_encode([
 
   async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
     const answer = (await this.php(`${BOOTSTRAP}
-$transactions = $om->get(\\Hardcastle\\LedgerDirect\\Port\\MagentoXrplTransactionRepository::class)->findTransactions($argv[1], (int) $argv[2]);
+$transactions = $om->get('${TRANSACTION_REPOSITORY[this.chain]}')->findTransactions($argv[1], (int) $argv[2]);
 echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier)) as { hashes?: string[] };
     return answer.hashes ?? [];
   }

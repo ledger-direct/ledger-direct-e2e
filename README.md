@@ -86,7 +86,7 @@ fulfil it. `--chain XRPL|STELLAR|XAHAU` picks one, each with its own treasury in
 |---|---|---|---|---|
 | XRPL testnet | destination tag | XRP | `faucet.altnet.rippletest.net`, DEX top-ups | ten cases green against PrestaShop and Shopware |
 | Stellar testnet | `MEMO_ID` | XLM | Friendbot | wallets and payments with memo verified; issued assets follow the core's Stellar registry; cases run once a plugin accepts Stellar |
-| Xahau testnet | destination tag | XAH | `xahau-test.net` for the treasury; a run's fresh account is opened by the treasury | the XRPL code with Xahau's profile; cases run against the Shopware preview (core 0.11) |
+| Xahau testnet | destination tag | XAH | `xahau-test.net` for the treasury; a run's fresh account is opened by the treasury | the XRPL code with Xahau's profile; cases run against Shopware (1.10.0) and Magento (1.2.0); the drivers point the shop at the chain `--chain` names |
 
 **Xahau is the XRP Ledger's code against another network**, as in the core: `src/chains/xrpl/profile.ts`
 holds what differs — nodes, faucet, explorer, native asset, issued assets — and `XrplLedger` takes the
@@ -123,7 +123,7 @@ Magento 1.1.0, WooCommerce 1.3.0).
 | PrestaShop 9 | `prestashop.ts` | orders through the module's `dev/bin/e2e.php` inside the shop container; everything a customer does is HTTP |
 | Shopware 6.7 | `shopware.ts` | Store API for the order (guest registration, cart, order, handle-payment), Admin API for configuration, order state and cancelling; the scheduled task runs through the container's console. The only driver with a `headless` API (`quote` and `check` over the Store API, plugin 1.8.0), which PS-12 uses |
 | WooCommerce | `woocommerce.ts` | orders through WP-CLI in the stack's running `wp` container (a PHP script on stdin, as the gateway's `process_payment` would); page, status endpoint and the refresh form over HTTP; the Action Scheduler hook fired for the safety net |
-| Magento 2 | `magento.ts` | REST API for the order (guest cart, item, addresses, payment method), admin REST for order state and cancelling; configuration, cron job and throttle mark as PHP inside the `phpfpm` container; accepts the dev shop's self-signed certificate |
+| Magento 2 | `magento.ts` | REST API for the order (guest cart, item, addresses, payment method), admin REST for order state and cancelling; configuration, cron job and throttle mark as PHP inside the `phpfpm` container; accepts the dev shop's self-signed certificate. On `--chain XAHAU` it writes the Xahau group and switches the XAH method (module 1.2.0) |
 
 The displayed amount is read off the page and never recomputed. That is the number a customer
 types into a wallet, and the one a rounding bug hides in.
