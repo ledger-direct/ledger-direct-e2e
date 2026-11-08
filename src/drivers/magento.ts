@@ -133,7 +133,7 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const chain = chainForAsset(this.chain, asset, Object.fromEntries(Object.entries(PAYMENT_METHODS).map(([c, m]) => [c, Object.keys(m)])));
+    const chain = chainForAsset(options.chain ?? this.chain, asset, Object.fromEntries(Object.entries(PAYMENT_METHODS).map(([c, m]) => [c, Object.keys(m)])));
     const method = PAYMENT_METHODS[chain][asset];
     const sku = options.productId ?? this.testProductSku ?? (await this.ensureTestProduct());
 
@@ -322,9 +322,11 @@ echo json_encode([
     return { count: Number.parseInt(count ?? '0', 10) || 0, last: rest.join('\n') || undefined };
   }
 
-  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
+    const repository = TRANSACTION_REPOSITORY[chain ?? this.chain];
+    if (!repository) throw new Error(`Magento: no transaction repository on ${chain}`);
     const answer = (await this.php(`${BOOTSTRAP}
-$transactions = $om->get('${TRANSACTION_REPOSITORY[this.chain]}')->findTransactions($argv[1], (int) $argv[2]);
+$transactions = $om->get('${repository}')->findTransactions($argv[1], (int) $argv[2]);
 echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier)) as { hashes?: string[] };
     return answer.hashes ?? [];
   }

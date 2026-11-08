@@ -80,7 +80,7 @@ export class ShopSession {
 
   async placeOrder(target: string, asset: string, options: OrderOptions & { chain?: ChainId } = {}): Promise<{ entry: SessionOrder; page: PaymentPageView }> {
     const d = this.driver(target);
-    const order = await d.placeOrder(asset, { productId: options.productId, quantity: options.quantity });
+    const order = await d.placeOrder(asset, { productId: options.productId, quantity: options.quantity, chain: options.chain });
     const page = await d.paymentPage(order);
     const clash = this.orders.get(order.id);
     const key = clash && clash.target !== target ? `${target}:${order.id}` : order.id;
@@ -121,7 +121,8 @@ export class ShopSession {
   }
 
   recordedHashes(key: string, page: Pick<PaymentPageView, 'destinationAccount' | 'paymentIdentifier'>): Promise<string[]> {
-    return this.driver(this.get(key).target).recordedHashes(page.destinationAccount, page.paymentIdentifier);
+    const e = this.get(key);
+    return this.driver(e.target).recordedHashes(page.destinationAccount, page.paymentIdentifier, e.chain);
   }
 
   /** Reads the page and pays what it asks for (or half, or the shortfall, or another asset) from the chain treasury. */

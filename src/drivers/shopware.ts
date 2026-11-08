@@ -116,7 +116,7 @@ export class ShopwareDriver implements Driver {
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const paymentMethodId = methodIdFor(chainForAsset(this.chain, asset, ASSETS_BY_CHAIN), asset);
+    const paymentMethodId = methodIdFor(chainForAsset(options.chain ?? this.chain, asset, ASSETS_BY_CHAIN), asset);
     const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     const storefrontUrl = await this.salesChannelUrl();
 
@@ -224,7 +224,7 @@ export class ShopwareDriver implements Driver {
    * payment table by memo id. The chain is the one configure() pointed the shop at — an
    * r-address alone does not say whether it is the XRP Ledger's or Xahau's.
    */
-  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
     const xrplForm = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(destinationAccount);
     const stellarForm = /^G[A-Z2-7]{55}$/.test(destinationAccount);
     if (!(xrplForm || stellarForm) || !/^\d+$/.test(paymentIdentifier)) {
@@ -233,7 +233,7 @@ export class ShopwareDriver implements Driver {
     const container = this.options.container ?? 'shopware6_672-shopware-1';
     const sql = stellarForm
       ? `SELECT DISTINCT hash FROM ledger_direct_stellar_payment WHERE destination = '${destinationAccount}' AND memo_id = ${paymentIdentifier}`
-      : `SELECT hash FROM ledger_direct_${this.chain === 'XAHAU' ? 'xahau' : 'xrpl'}_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
+      : `SELECT hash FROM ledger_direct_${(chain ?? this.chain) === 'XAHAU' ? 'xahau' : 'xrpl'}_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
     const { stdout } = await run('docker', ['exec', container, 'bash', '-lc', `mysql -h 127.0.0.1 -u root -proot shopware -N -e "${sql}" 2>/dev/null`]);
     return stdout.split('\n').map((l) => l.trim()).filter((l) => l !== '');
   }

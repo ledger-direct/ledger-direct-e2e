@@ -107,7 +107,7 @@ echo json_encode(['currency' => get_woocommerce_currency(), 'products' => array_
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const paymentType = PAYMENT_TYPES[chainForAsset(this.chain, asset, ASSETS_BY_CHAIN)][asset];
+    const paymentType = PAYMENT_TYPES[chainForAsset(options.chain ?? this.chain, asset, ASSETS_BY_CHAIN)][asset];
     const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     // A guest, every time: the catalogue's PS-06 is the rule, not the exception.
     const r = (await this.wp(`<?php
@@ -264,11 +264,11 @@ echo json_encode(['id' => $id]), "\\n";`, sku)) as { id: number };
     return (this.testProductId = String(r.id));
   }
 
-  async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
+  async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
     const answer = (await this.wp(`<?php
 // The chain's sync service (plugin 1.5.0 takes the chain; an older plugin ignores the argument and answers for the XRP Ledger).
 $transactions = \\Hardcastle\\LedgerDirect\\Service\\ServiceFactory::getInstance()->getSyncService($args[2])->findTransactions($args[0], (int) $args[1]);
-echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier, this.chain)) as { hashes?: string[] };
+echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transactions)]), "\\n";`, destinationAccount, paymentIdentifier, chain ?? this.chain)) as { hashes?: string[] };
     return answer.hashes ?? [];
   }
 
