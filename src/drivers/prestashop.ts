@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { assertComposeDir, explainComposeError } from './compose.js';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
-import { chainForAsset } from './chains.js';
+import { orderChain } from './chains.js';
 import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
@@ -57,12 +57,13 @@ export class PrestaShopDriver implements Driver {
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder & { pollUrl: string; pageUrl: string; cronUrl: string }> {
-    const args: Record<string, string> = { chain: chainForAsset(options.chain ?? this.chain, asset, ASSETS_BY_CHAIN), asset };
+    const chain = orderChain(options.chain, this.chain, asset, ASSETS_BY_CHAIN);
+    const args: Record<string, string> = { chain, asset };
     if (options.productId) args.product = options.productId;
     if (options.quantity) args.quantity = String(options.quantity);
     const r = (await this.helper('create-order', args)) as { id_order: number; reference: string; key: string; page: string; poll: string; cron: string };
     this.cronUrl = this.rebase(r.cron);
-    return { id: String(r.id_order), reference: r.reference, secret: r.key, pollUrl: this.rebase(r.poll), pageUrl: this.rebase(r.page), cronUrl: this.cronUrl };
+    return { id: String(r.id_order), reference: r.reference, secret: r.key, chain, pollUrl: this.rebase(r.poll), pageUrl: this.rebase(r.page), cronUrl: this.cronUrl };
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {

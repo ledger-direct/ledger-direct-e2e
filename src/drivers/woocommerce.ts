@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
-import { chainForAsset } from './chains.js';
+import { orderChain } from './chains.js';
 import { throttleKeys } from './throttle.js';
 
 export interface WooCommerceOptions {
@@ -107,7 +107,8 @@ echo json_encode(['currency' => get_woocommerce_currency(), 'products' => array_
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const paymentType = PAYMENT_TYPES[chainForAsset(options.chain ?? this.chain, asset, ASSETS_BY_CHAIN)][asset];
+    const chain = orderChain(options.chain, this.chain, asset, ASSETS_BY_CHAIN);
+    const paymentType = PAYMENT_TYPES[chain][asset];
     const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     // A guest, every time: the catalogue's PS-06 is the rule, not the exception.
     const r = (await this.wp(`<?php
@@ -125,7 +126,7 @@ $order->save();
 echo json_encode(['id' => $order->get_id(), 'number' => $order->get_order_number(), 'key' => $order->get_order_key()]), "\\n";`, paymentType, productId, String(options.quantity ?? 1))) as { id: number; number: string; key: string };
     const id = String(r.id);
     this.assetOf.set(id, asset);
-    return { id, reference: r.number, secret: r.key };
+    return { id, reference: r.number, secret: r.key, chain };
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {

@@ -84,7 +84,9 @@ export class ShopSession {
     const page = await d.paymentPage(order);
     const clash = this.orders.get(order.id);
     const key = clash && clash.target !== target ? `${target}:${order.id}` : order.id;
-    const entry: SessionOrder = { key, order, target, asset, chain: options.chain ?? 'XRPL', placedAt: new Date().toISOString() };
+    // The chain the driver placed the order on: the one asked for, else the asset's; XRPL for a driver that does not say.
+    const chain = (options.chain ?? order.chain ?? 'XRPL') as ChainId;
+    const entry: SessionOrder = { key, order, target, asset, chain, placedAt: new Date().toISOString() };
     this.orders.set(key, entry);
     return { entry, page };
   }

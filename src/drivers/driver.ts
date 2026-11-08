@@ -43,6 +43,8 @@ export interface PlacedOrder {
   reference: string;
   /** The per-order secret the platform uses instead of a login (secure_key, deepLinkCode, …). */
   secret: string;
+  /** The chain the order was placed on, as the driver resolved it (OrderOptions.chain or the asset's). */
+  chain?: string;
 }
 
 export interface PaymentPageView {

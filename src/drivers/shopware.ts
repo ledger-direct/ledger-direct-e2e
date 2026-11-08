@@ -3,7 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
-import { chainForAsset } from './chains.js';
+import { orderChain } from './chains.js';
 import { readPaymentPage } from './page.js';
 
 const run = promisify(execFile);
@@ -116,7 +116,8 @@ export class ShopwareDriver implements Driver {
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const paymentMethodId = methodIdFor(chainForAsset(options.chain ?? this.chain, asset, ASSETS_BY_CHAIN), asset);
+    const chain = orderChain(options.chain, this.chain, asset, ASSETS_BY_CHAIN);
+    const paymentMethodId = methodIdFor(chain, asset);
     const productId = options.productId ?? this.testProductId ?? (await this.ensureTestProduct());
     const storefrontUrl = await this.salesChannelUrl();
 
@@ -148,7 +149,7 @@ export class ShopwareDriver implements Driver {
     // handle-payment answers a relative URL; the returnUrl inside it carries Shopware's payment token.
     const returnUrl = payment.redirectUrl ? new URL(payment.redirectUrl, this.options.baseUrl).searchParams.get('returnUrl') ?? '' : '';
     this.secretOf.set(order.id, { deepLinkCode: order.deepLinkCode, returnUrl, asset });
-    return { id: order.id, reference: order.orderNumber, secret: order.deepLinkCode };
+    return { id: order.id, reference: order.orderNumber, secret: order.deepLinkCode, chain };
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
