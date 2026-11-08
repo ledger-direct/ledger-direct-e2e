@@ -1,6 +1,6 @@
 # ledger-direct-e2e
 
-**End-to-end tests for ledger payment integrations — XRPL and Stellar — against a real testnet, with evidence you can look up.**
+**End-to-end tests for ledger payment integrations — XRPL, Stellar and Xahau — against a real testnet, with evidence you can look up.**
 
 The harness plays the customer with a wallet. It reads what a shop asks for off its payment page,
 sends exactly that — or deliberately something else — as a signed transaction on the chain's
@@ -50,8 +50,10 @@ npm install && npm run build
 set -a; source ~/.config/ledger-direct/testnet.env; set +a
 #   LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED     the XRPL treasury (XRP, RLUSD, USDC)
 #   LEDGERDIRECT_TESTNET_STELLAR_TREASURY_SEED  the Stellar treasury (XLM)
+#   LEDGERDIRECT_TESTNET_XAHAU_TREASURY_SEED    the Xahau treasury (XAH)
 ld-e2e wallet status                          # --chain XRPL is the default
 ld-e2e --chain STELLAR wallet status
+ld-e2e --chain XAHAU wallet status
 ld-e2e run --target prestashop --base-url http://localhost:8080 \
   --compose-dir /path/to/prestashop-harness --cases automated   # --chain STELLAR once a plugin accepts it
 ld-e2e run --target shopware --base-url http://localhost \
@@ -68,7 +70,7 @@ the current one is used; the PrestaShop driver checks it before its first comman
 and says to `docker compose up -d` when the stack is stopped. Started from anywhere else — the lab, an MCP
 client — set the variable.
 
-Every command takes `--chain XRPL|STELLAR`; without it, XRPL. Each chain has its own treasury
+Every command takes `--chain XRPL|STELLAR|XAHAU`; without it, XRPL. Each chain has its own treasury
 wallet, and a run creates a fresh receiving account on that chain (two runs must never share an
 identifier space), sets trust lines, points the shop at it, places real orders and pays them from
 the chain's treasury. `out/report.json` holds the evidence; the console prints one checklist line per
@@ -78,14 +80,26 @@ case.
 
 The catalogue talks about a receiving account, a payment identifier, a native asset, issued assets
 and a hash — none of which is XRPL. `src/chains/chain.ts` is the contract; `xrpl/` and `stellar/`
-fulfil it. `--chain XRPL|STELLAR` picks one, each with its own treasury in the environment.
+fulfil it. `--chain XRPL|STELLAR|XAHAU` picks one, each with its own treasury in the environment.
 
 | Chain | Identifier | Native | Faucet | Status |
 |---|---|---|---|---|
 | XRPL testnet | destination tag | XRP | `faucet.altnet.rippletest.net`, DEX top-ups | ten cases green against PrestaShop and Shopware |
 | Stellar testnet | `MEMO_ID` | XLM | Friendbot | wallets and payments with memo verified; issued assets follow the core's Stellar registry; cases run once a plugin accepts Stellar |
+| Xahau testnet | destination tag | XAH | `xahau-test.net` for the treasury; a run's fresh account is opened by the treasury | the XRPL code with Xahau's profile; cases run against the Shopware preview (core 0.11) |
 
-A third chain is one class behind the contract, one entry in `ledgerFor()`, one treasury variable.
+**Xahau is the XRP Ledger's code against another network**, as in the core: `src/chains/xrpl/profile.ts`
+holds what differs — nodes, faucet, explorer, native asset, issued assets — and `XrplLedger` takes the
+profile. Two things an r-address does not tell: which network it belongs to (the same address is valid
+on both, `isAccountOf()` passes it for both, only the shop's configuration says which) and which key
+algorithm its seed uses (`walletFromSeed()` reads it off the seed: `sEd…` is ed25519, every other `s…`
+is secp256k1, which the faucets hand out; xrpl.js alone would derive another account). Xahau has no
+issued assets in the core's catalogue, so PS-04 is recorded as skipped there (`needsIssuedAssets` in
+the catalogue), not failed. A payment in XAH is capped at 5 000 by default instead of 50 — the same few
+euros (`LD_E2E_MAX_PAYMENT` still caps every asset alike when set).
+
+A further chain of the XRPL family is one profile; one with another protocol is one class behind the
+contract, one entry in `ledgerFor()`, one treasury variable.
 
 ## Drivers
 
@@ -234,11 +248,14 @@ ld-e2e wallet fresh --trustlines                 # a new XRPL account for one ru
 ld-e2e --chain STELLAR wallet fresh              # the same on Stellar, via Friendbot
 ld-e2e wallet fund r...                          # XRPL faucet, +100 XRP
 ld-e2e --chain STELLAR wallet fund G...          # Friendbot, +10 000 XLM
+ld-e2e --chain XAHAU wallet fund r...            # Xahau faucet, +1 000 XAH; a second request waits minutes
 ld-e2e wallet book RLUSD                         # XRPL only: what the testnet DEX offers
 ld-e2e wallet top-up --rlusd 20                  # XRPL only: buy tokens on the DEX — no faucet web page, no captcha
-ld-e2e wallet ensure --xrp 50 --rlusd 10 --usdc 10   # XRPL only: top the treasury up to these minimums, or fail
+ld-e2e wallet ensure --xrp 50 --rlusd 10 --usdc 10   # XRPL: top the treasury up to these minimums, or fail
+ld-e2e --chain XAHAU wallet ensure --xrp 200     # Xahau: XAH from the faucet alone (--xrp names the native asset)
 ld-e2e pay --to r... --id 123 --amount 0.83 [--asset RLUSD] [--partial]     # XRPL: --id is the destination tag
 ld-e2e --chain STELLAR pay --to G... --id 123 --amount 1.5                    # Stellar: --id is the MEMO_ID
+ld-e2e --chain XAHAU pay --to r... --id 123 --amount 110.5                    # Xahau: XAH, --id is the destination tag
 ```
 
 **The treasury refills itself.** Every run opens a fresh receiving account at the faucet (100 XRP)
@@ -247,7 +264,10 @@ also when the run broke off, everything on that account goes back to the treasur
 of every stablecoin line, and the XRP above the account's reserve (about 1.4 XRP stays). So a run
 returns what it paid plus the faucet's 100 XRP, instead of only paying out; the report carries it as
 `returned`. `--keep-account` keeps the account (the shop still points at it), and so does a run with
-a given `--receiving-account`. On XRPL only; on Stellar the account stays as it is.
+a given `--receiving-account`. On XRPL and Xahau; on Stellar the account stays as it is. On Xahau the
+fresh account is not the faucet's but the treasury's: it opens the account with 20 XAH, since the faucet
+refuses a second request from the same address for minutes, and the sweep brings all but the 1 XAH
+reserve back.
 
 `wallet ensure` is the safety net for what still drains the treasury (a run killed before it could
 return anything, a testnet reset): it asks the faucet for XRP and buys stablecoins on the DEX until

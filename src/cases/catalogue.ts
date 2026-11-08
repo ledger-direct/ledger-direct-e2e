@@ -17,6 +17,12 @@ export interface CaseSpec {
   /** Cases that wait for a timeout to pass (PS-10: 35 minutes); left out of the `testnet` set. */
   longWait?: boolean;
   /**
+   * Issued assets the case needs on the chain (PS-04 pays a token order in another
+   * token). On a chain with fewer the case is recorded as skipped, not failed: Xahau's
+   * catalogue entry is XAH alone.
+   */
+  needsIssuedAssets?: number;
+  /**
    * The platforms a case exists for; absent means every one. The catalogue is
    * platform-neutral by design, so this stays rare: PS-12 is Shopware's Store API.
    * A run against another platform records the case as skipped, not failed.
@@ -38,7 +44,7 @@ export const CASES: readonly CaseSpec[] = [
     expects: ['state expired, seconds_left null', 'refresh yields a new amount', 'destination tag unchanged', 'refresh refused once something arrived'] },
   { id: 'PS-03', title: 'Partial, then topped up', asset: 'XRP', summary: 'Send half of the displayed amount, then the shortfall.',
     expects: ['state partial with amount_paid and shortfall', 'merchant sees the partial state', 'top-up settles: redirect, hash of the second transaction, amount_paid is the sum'] },
-  { id: 'PS-04', title: 'Wrong asset, then the right one', asset: 'USDC', summary: 'Pay a USDC order in RLUSD, then in USDC; then an XRP order in RLUSD, then in XRP.',
+  { id: 'PS-04', title: 'Wrong asset, then the right one', asset: 'USDC', needsIssuedAssets: 2, summary: 'Pay a USDC order in RLUSD, then in USDC; then an XRP order in RLUSD, then in XRP.',
     expects: ['state wrong_asset, shortfall is the full request, amount_paid the delivered asset', 'merchant sees the incomplete state', 'the quoted asset settles', 'the same across the asset class (core 0.8.1)'], nightlyOnly: true },
   { id: 'PS-05', title: 'Settled', asset: 'XRP', summary: 'Send exactly the displayed amount on a small order.',
     expects: ['state settled with redirect', 'exactly one transition to paid', 'one payment record with the hash'] },

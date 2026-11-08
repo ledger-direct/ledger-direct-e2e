@@ -1,7 +1,8 @@
-import { Client, Payment, PaymentFlags, Wallet, dropsToXrp } from 'xrpl';
+import { Client, Payment, PaymentFlags, dropsToXrp } from 'xrpl';
 import type { SweepResult } from '../chain.js';
-import { TESTNET_ISSUED, assetFromCurrency } from './assets.js';
+import { XRPL, type XrplProfile, assetFromCurrencyOn } from './profile.js';
 import { submitWithRetry } from './submit.js';
+import { walletFromSeed } from './wallets.js';
 
 /** Left on the account for the fees of the sweep's own transactions, in drops. */
 export const FEE_MARGIN_DROPS = 1000n;
@@ -33,17 +34,17 @@ type Submit = typeof submitWithRetry;
  * The account itself stays, with its trust lines and its reserve (about 1.4 XRP):
  * deleting it needs 256 ledgers after its creation, longer than a run.
  */
-export async function sweep(client: Client, seed: string, to: string, submit: Submit = submitWithRetry): Promise<SweepResult> {
-  const wallet = Wallet.fromSeed(seed);
+export async function sweep(client: Client, seed: string, to: string, submit: Submit = submitWithRetry, profile: XrplProfile = XRPL): Promise<SweepResult> {
+  const wallet = walletFromSeed(seed);
   const from = wallet.classicAddress;
   const result: SweepResult = { native: '0', tokens: {}, hashes: [], failed: [] };
 
   const lines = await client.request({ command: 'account_lines', account: from, ledger_index: 'validated' });
   const returned: AssetKey[] = [];
   for (const line of lines.result.lines) {
-    const asset = assetFromCurrency(line.currency);
-    if (asset === null || asset === 'XRP') continue;
-    const issued = TESTNET_ISSUED[asset];
+    const asset = assetFromCurrencyOn(profile, line.currency);
+    if (asset === null || asset === profile.nativeAsset) continue;
+    const issued = profile.issued[asset];
     if (issued.issuer !== line.account || !(Number(line.balance) > 0)) continue;
     const amount = { currency: issued.currency, issuer: issued.issuer, value: line.balance };
     const tx: Payment = { TransactionType: 'Payment', Account: from, Destination: to, Amount: amount, SendMax: amount, Flags: PaymentFlags.tfPartialPayment };
@@ -82,7 +83,7 @@ export async function sweep(client: Client, seed: string, to: string, submit: Su
     const tx: Payment = { TransactionType: 'Payment', Account: from, Destination: to, Amount: spendable.toString() };
     try {
       const response = await submit(client, wallet, tx);
-      requireSuccess(response, `${dropsToXrp(spendable.toString())} XRP`);
+      requireSuccess(response, `${dropsToXrp(spendable.toString())} ${profile.nativeAsset}`);
       result.native = String(dropsToXrp(spendable.toString()));
       result.hashes.push(response.result.hash);
     } catch (error) {

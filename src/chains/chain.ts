@@ -8,7 +8,7 @@
  * XRP and IssuedCurrencyAmounts; on Stellar a G-address, the MEMO_ID (or a
  * muxed address), XLM and classic assets. The cases never know which.
  */
-export type ChainId = 'XRPL' | 'STELLAR';
+export type ChainId = 'XRPL' | 'STELLAR' | 'XAHAU';
 
 export interface ChainAsset {
   /** As the shop names it: XRP, RLUSD, USDC, XLM, EURC … */

@@ -39,7 +39,10 @@ describe('the shop account per chain', () => {
     expect(isAccountOf('XRPL', g)).toBe(false);
     expect(isAccountOf('STELLAR', g)).toBe(true);
     expect(isAccountOf('stellar', r)).toBe(false);
-    expect(isAccountOf('XAHAU', r)).toBe(false);
+    // Xahau shares the XRP Ledger's address form: an r-address passes on both. Only the configuration says which network it is meant for.
+    expect(isAccountOf('XAHAU', r)).toBe(true);
+    expect(isAccountOf('XAHAU', g)).toBe(false);
+    expect(isAccountOf('SOLANA', r)).toBe(false);
   });
 });
 
