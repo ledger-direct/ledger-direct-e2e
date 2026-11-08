@@ -31,3 +31,10 @@ describe('WooCommerce settings per chain', () => {
     expect(() => woocommerceSettings({ chain: 'STELLAR', destinationAccount: 'G', network: 'testnet', assets: ['XLM'], quoteExpirySeconds: 300 })).toThrow(/no payment types on STELLAR/);
   });
 });
+
+describe('Xahau without its asset', () => {
+  it('switches the chain off instead of enabling an unrequested asset', () => {
+    const { settings } = woocommerceSettings({ chain: 'XAHAU', destinationAccount: 'rXahau', network: 'testnet', assets: [], quoteExpirySeconds: 300 });
+    expect(settings.xahau_enabled).toBe('no');
+  });
+});

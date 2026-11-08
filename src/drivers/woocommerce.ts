@@ -47,7 +47,8 @@ export function woocommerceSettings(config: ShopConfig): { chain: string; settin
     settings.xrpl_is_usdc_enabled = config.assets.includes('USDC') ? 'yes' : 'no';
   } else {
     const prefix = chain.toLowerCase();
-    settings[`${prefix}_enabled`] = 'yes';
+    // The chain is on exactly when one of its assets is asked for, like the XRPL asset switches above.
+    settings[`${prefix}_enabled`] = config.assets.some((asset) => PAYMENT_TYPES[chain][asset] !== undefined) ? 'yes' : 'no';
     settings[`${prefix}_network`] = 'testnet';
     settings[`${prefix}_testnet_destination_account`] = config.destinationAccount;
   }
