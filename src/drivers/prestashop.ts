@@ -28,11 +28,15 @@ export class PrestaShopDriver implements Driver {
 
   private cronUrl?: string;
   private composeChecked = false;
+  /** The chain configure() last pointed the shop at; XRPL until then. The helper (module 0.6.0) takes it on every command. */
+  private chain = 'XRPL';
 
   constructor(private readonly options: PrestaShopOptions) {}
 
   async configure(config: ShopConfig): Promise<void> {
+    this.chain = (config.chain || 'XRPL').toUpperCase();
     const r = (await this.helper('configure', {
+      chain: this.chain,
       account: config.destinationAccount,
       network: config.network,
       assets: config.assets.join(','),
@@ -47,7 +51,7 @@ export class PrestaShopDriver implements Driver {
   }
 
   async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder & { pollUrl: string; pageUrl: string; cronUrl: string }> {
-    const args: Record<string, string> = { asset };
+    const args: Record<string, string> = { chain: this.chain, asset };
     if (options.productId) args.product = options.productId;
     if (options.quantity) args.quantity = String(options.quantity);
     const r = (await this.helper('create-order', args)) as { id_order: number; reference: string; key: string; page: string; poll: string; cron: string };
@@ -104,12 +108,12 @@ export class PrestaShopDriver implements Driver {
 
   /** The throttle mark's stored value: it changes exactly when a sync ran. */
   async nodeRequests(): Promise<number | null> {
-    const r = (await this.helper('sync-marker', {})) as { value: string | null };
+    const r = (await this.helper('sync-marker', { chain: this.chain })) as { value: string | null };
     return r.value === null ? 0 : Number.parseInt(r.value, 10);
   }
 
   async recordedHashes(destinationAccount: string, paymentIdentifier: string): Promise<string[]> {
-    const answer = (await this.helper('transactions', { account: destinationAccount, tag: paymentIdentifier })) as { hashes?: string[] };
+    const answer = (await this.helper('transactions', { chain: this.chain, account: destinationAccount, tag: paymentIdentifier })) as { hashes?: string[] };
     // A helper without the command answers with its command list; that is not "nothing on record".
     if (!Array.isArray(answer.hashes)) throw new Error('the shop helper does not know "transactions" (module older than PrestaShop #31?)');
     return answer.hashes;
