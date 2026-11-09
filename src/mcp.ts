@@ -42,7 +42,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
   const targetSchema = z.enum(TARGETS).describe('the shop under test');
   const chainEnum = z.enum(CHAINS);
   const chainSchema = chainEnum.default('XRPL').describe('the chain; XRPL by default');
-  const orderAsset = z.enum(['XRP', 'RLUSD', 'USDC', 'XAH']);
+  const orderAsset = z.enum(['XRP', 'RLUSD', 'USDC', 'XAH', 'XLM', 'EURC']);
 
   function text(data: unknown): { content: Array<{ type: 'text'; text: string }> } {
     return { content: [{ type: 'text', text: redact(typeof data === 'string' ? data : JSON.stringify(data, null, 2)) }] };
@@ -78,12 +78,13 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
     description: 'Places an order for a product paid with a LedgerDirect asset and reads the payment page: what to send, where, with which identifier. Nothing is paid yet.',
     inputSchema: {
       target: targetSchema,
-      asset: orderAsset.describe('the asset the order is quoted in; XAH places the order on Xahau'),
+      asset: orderAsset.describe('the asset the order is quoted in; XAH places the order on Xahau, XLM and EURC on Stellar'),
+      chain: chainEnum.optional().describe('the chain to place the order on, for an asset on several chains such as USDC; the shop\'s configured chain, else the chain that has the asset, when absent'),
       productId: z.string().optional().describe('from shop_search_products; the shop\'s cheap test article when absent'),
       quantity: z.number().int().min(1).max(100).default(1),
     },
-  }, async ({ target, asset, productId, quantity }) => {
-    const { entry, page } = await session.placeOrder(target, asset, { productId, quantity });
+  }, async ({ target, asset, chain, productId, quantity }) => {
+    const { entry, page } = await session.placeOrder(target, asset, { productId, quantity, chain });
     return text({ orderId: entry.key, reference: entry.order.reference, paymentPage: page });
   });
 

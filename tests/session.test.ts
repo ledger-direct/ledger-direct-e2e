@@ -141,7 +141,7 @@ describe('MCP shop tools over the session', () => {
       async placeOrder(asset, options) { return xah(await base.placeOrder(asset, options)); },
       async paymentPage(o) { return { ...(await base.paymentPage(o)), asset: 'XAH' }; },
     };
-    const s = new ShopSession({ driver: () => ({ driver, baseUrl: 'http://shop' }), ledger: (chain) => { ledgers.push(chain); return fakeLedger(); }, payerSeed: () => 'sTreasury' });
+    const s = new ShopSession({ driver: () => ({ driver, baseUrl: 'http://shop' }), ledger: (chain) => { ledgers.push(chain); return { ...fakeLedger(), chain }; }, payerSeed: (chain) => `s${chain}` });
     const client = await connected(s);
 
     const placed = await client.callTool({ name: 'shop_place_order', arguments: { target: 'prestashop', asset: 'XAH' } });
@@ -149,6 +149,55 @@ describe('MCP shop tools over the session', () => {
     const paid = await client.callTool({ name: 'shop_pay_order', arguments: { orderId: '1' } });
     expect(paid.isError).toBeFalsy();
     expect(ledgers).toEqual(['XAHAU']);
-    expect(signed[0]).toMatchObject({ asset: 'XAH', to: 'rShop' });
+    expect(signed[0]).toMatchObject({ asset: 'XAH', to: 'rShop', seed: 'sXAHAU' });
+  });
+
+  /** A session whose driver places every order on `placedOn`, and the chains its ledgers were asked for. */
+  function chainSession(placedOn: string) {
+    const ledgers: string[] = [];
+    const requested: Array<string | undefined> = [];
+    const base = fakeDriver('shopware', () => '1');
+    const driver: Driver = {
+      ...base,
+      async placeOrder(asset, options) { requested.push(options?.chain); return { ...(await base.placeOrder(asset, options)), chain: options?.chain ?? placedOn }; },
+    };
+    const s = new ShopSession({ driver: () => ({ driver, baseUrl: 'http://shop' }), ledger: (chain) => { ledgers.push(chain); return { ...fakeLedger(), chain }; }, payerSeed: (chain) => `s${chain}` });
+    return { s, ledgers, requested };
+  }
+
+  it('prefers a chain named for the payment over the chain of the order', async () => {
+    const { s, ledgers } = chainSession('XAHAU');
+    const client = await connected(s);
+    await client.callTool({ name: 'shop_place_order', arguments: { target: 'shopware', asset: 'XRP' } });
+
+    const paid = await client.callTool({ name: 'shop_pay_order', arguments: { orderId: '1', chain: 'XRPL' } });
+
+    expect(paid.isError).toBeFalsy();
+    expect(ledgers).toEqual(['XRPL']);
+    expect(signed[0]).toMatchObject({ seed: 'sXRPL' });
+  });
+
+  it.each(['XLM', 'EURC'])('places a %s order and pays it on the chain the driver chose', async (asset) => {
+    const { s, ledgers, requested } = chainSession('STELLAR');
+    const client = await connected(s);
+
+    const placed = await client.callTool({ name: 'shop_place_order', arguments: { target: 'shopware', asset } });
+    expect(placed.isError, JSON.stringify(placed.content)).toBeFalsy();
+    await client.callTool({ name: 'shop_pay_order', arguments: { orderId: '1' } });
+
+    expect(requested).toEqual([undefined]);
+    expect(ledgers).toEqual(['STELLAR']);
+    expect(signed[0]).toMatchObject({ seed: 'sSTELLAR' });
+  });
+
+  it('hands a chain named for the order to the driver', async () => {
+    const { s, ledgers, requested } = chainSession('XRPL');
+    const client = await connected(s);
+
+    await client.callTool({ name: 'shop_place_order', arguments: { target: 'shopware', asset: 'USDC', chain: 'STELLAR' } });
+    await client.callTool({ name: 'shop_pay_order', arguments: { orderId: '1' } });
+
+    expect(requested).toEqual(['STELLAR']);
+    expect(ledgers).toEqual(['STELLAR']);
   });
 });
