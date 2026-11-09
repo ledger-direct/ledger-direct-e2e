@@ -181,6 +181,10 @@ recorded. The rules every tool keeps: testnet only; no seed ever leaves the serv
 rejected is an error, never a success with a hash. `wallet_status` shows what the server has paid
 since it started.
 
+Every tool with a `chain` takes `XRPL`, `STELLAR` or `XAHAU`, XRPL when absent. The exception is
+`shop_pay_order`, which pays on the chain the order was placed on unless told otherwise; an order
+quoted in XAH goes on Xahau.
+
 ## As a library: the session and the deviation rules
 
 The third door, for a person: [`ledger-direct-lab`](https://github.com/ledger-direct/ledger-direct-lab)

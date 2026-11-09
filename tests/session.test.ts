@@ -114,4 +114,41 @@ describe('MCP shop tools over the session', () => {
     const unknown = await client.callTool({ name: 'shop_order_status', arguments: { orderId: '42' } });
     expect(unknown.isError).toBe(true);
   });
+
+  async function connected(s: ShopSession): Promise<Client> {
+    const [clientSide, serverSide] = InMemoryTransport.createLinkedPair();
+    await createServer({ session: s }).connect(serverSide);
+    const client = new Client({ name: 'test', version: '0' });
+    await client.connect(clientSide);
+    return client;
+  }
+
+  it('offers Xahau on every tool that takes a chain, and XAH where an asset is chosen', async () => {
+    const { tools } = await (await connected(session())).listTools();
+    const property = (tool: string, name: string) => (tools.find((t) => t.name === tool)?.inputSchema.properties?.[name] ?? {}) as { enum?: string[] };
+    for (const tool of ['shop_pay_order', 'wallet_status', 'wallet_fresh', 'wallet_fund', 'pay', 'run_cases']) {
+      expect(property(tool, 'chain').enum, tool).toContain('XAHAU');
+    }
+    for (const tool of ['shop_place_order', 'shop_pay_order']) expect(property(tool, 'asset').enum, tool).toContain('XAH');
+  });
+
+  it('pays an XAH order on Xahau when the client names no chain', async () => {
+    const ledgers: string[] = [];
+    const xah = (o: PlacedOrder): PlacedOrder => ({ ...o, chain: 'XAHAU' });
+    const base = fakeDriver('prestashop', () => '1');
+    const driver: Driver = {
+      ...base,
+      async placeOrder(asset, options) { return xah(await base.placeOrder(asset, options)); },
+      async paymentPage(o) { return { ...(await base.paymentPage(o)), asset: 'XAH' }; },
+    };
+    const s = new ShopSession({ driver: () => ({ driver, baseUrl: 'http://shop' }), ledger: (chain) => { ledgers.push(chain); return fakeLedger(); }, payerSeed: () => 'sTreasury' });
+    const client = await connected(s);
+
+    const placed = await client.callTool({ name: 'shop_place_order', arguments: { target: 'prestashop', asset: 'XAH' } });
+    expect(placed.isError).toBeFalsy();
+    const paid = await client.callTool({ name: 'shop_pay_order', arguments: { orderId: '1' } });
+    expect(paid.isError).toBeFalsy();
+    expect(ledgers).toEqual(['XAHAU']);
+    expect(signed[0]).toMatchObject({ asset: 'XAH', to: 'rShop' });
+  });
 });
