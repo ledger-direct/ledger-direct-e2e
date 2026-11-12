@@ -30,7 +30,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.1",
-    "@stellar/stellar-sdk": "^17.1.0",
+    "@stellar/stellar-sdk": "^17.4.0",
     "commander": "^13.1.0",
     "xrpl": "^4.2.5",
     "zod": "^4.6.5"
@@ -40,6 +40,6 @@
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
     "vitest": "^3.1.4",
-    "ws": "^8.22.0"
+    "ws": "^8.22.1"
   }
 }
