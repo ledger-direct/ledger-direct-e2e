@@ -26,3 +26,7 @@ updates:
       npm:
         patterns: ['*']
         update-types: [minor, patch]
+    ignore:
+      # The type definitions follow the oldest Node version CI tests (22), not the newest release.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
