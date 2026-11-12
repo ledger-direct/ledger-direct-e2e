@@ -56,8 +56,9 @@ describe('walletFromSeed', () => {
     expect(secp.seed!.startsWith('sEd')).toBe(false);
     expect(walletFromSeed(ed.seed!).classicAddress).toBe(ed.classicAddress);
     expect(walletFromSeed(secp.seed!).classicAddress).toBe(secp.classicAddress);
-    // The quirk this exists for: xrpl.js alone derives another account from a secp256k1 seed.
-    expect(Wallet.fromSeed(secp.seed!).classicAddress).not.toBe(secp.classicAddress);
+    // xrpl.js 4 derived another account from a secp256k1 seed without an explicit algorithm;
+    // since 5.0 it reads the prefix too, and both agree.
+    expect(Wallet.fromSeed(secp.seed!).classicAddress).toBe(secp.classicAddress);
     expect(new XrplLedger(XAHAU).addressOf(secp.seed!)).toBe(secp.classicAddress);
   });
 });
