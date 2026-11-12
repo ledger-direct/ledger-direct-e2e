@@ -1,0 +1,35 @@
+name: Audit
+
+# Known vulnerabilities in the dependencies (package-lock.json): weekly, on demand, and on every pull request
+# or push that changes package-lock.json or this file. Fails on high and critical advisories in the runtime
+# dependencies; all others are listed in the log without failing the run.
+
+on:
+  push:
+    branches: [main]
+    paths: [package-lock.json, .github/workflows/audit.yml]
+  pull_request:
+    paths: [package-lock.json, .github/workflows/audit.yml]
+  schedule:
+    - cron: '31 5 * * 1'
+  workflow_dispatch:
+
+# Reads the repository, nothing else.
+permissions:
+  contents: read
+
+jobs:
+  npm:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: All advisories (listed, not failing)
+        run: npm audit || true
+      - name: No high or critical advisory in the runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
