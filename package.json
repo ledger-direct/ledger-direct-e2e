@@ -20,7 +20,7 @@
     "dist"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -32,7 +32,7 @@
     "@modelcontextprotocol/sdk": "^1.30.1",
     "@stellar/stellar-sdk": "^17.4.0",
     "commander": "^15.0.0",
-    "xrpl": "^4.2.5",
+    "xrpl": "^5.3.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

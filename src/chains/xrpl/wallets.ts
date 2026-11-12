@@ -17,9 +17,10 @@ const FAUCET_TIMEOUT_MS = 60_000;
 /**
  * The wallet a seed stands for. A seed names its own algorithm: `sEd…` is
  * ed25519, every other `s…` seed is secp256k1 — the XRPL and Xahau faucets
- * hand out the latter. xrpl.js's `Wallet.fromSeed()` assumes ed25519 for a
- * seed without the prefix and derives an address that owns nothing, which is
- * why every seed in this harness goes through here.
+ * hand out the latter. xrpl.js before 5.0 assumed ed25519 for a seed without
+ * the prefix and derived an address that owns nothing; 5.0 reads the prefix
+ * as well. Every seed in this harness still goes through here, so the account
+ * a seed stands for does not depend on the library version.
  */
 export function walletFromSeed(seed: string): Wallet {
   // The enum's values, spelled out: xrpl.js re-exports ECDSA in a way Node's ESM loader does not see as a named export.
