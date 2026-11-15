@@ -93,6 +93,11 @@ export interface Driver {
   readonly name: 'prestashop' | 'shopware' | 'woocommerce' | 'magento';
   /** Present on a platform with a headless API (Shopware's Store API); PS-12 runs there only. */
   readonly headless?: HeadlessApi;
+  /**
+   * A request to a URL of the shop over the driver's own connections, where they differ from the
+   * process's default (Magento: a dev shop's self-signed certificate). Absent: `httpFetch`.
+   */
+  shopFetch?(url: string | URL, init?: RequestInit): Promise<Response>;
   configure(config: ShopConfig): Promise<void>;
   /** Products matching a free-text query, the way a customer would search. */
   findProducts(query: string): Promise<Product[]>;

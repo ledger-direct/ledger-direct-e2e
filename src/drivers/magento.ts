@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { Agent, Pool } from 'undici';
 import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
@@ -21,10 +22,29 @@ export interface MagentoOptions {
   /** SKU of the cheap test article the driver creates on first use. */
   testProductSku?: string;
   /**
-   * Accept the dev shop's self-signed certificate. Node has no per-request switch for
-   * that, so this is process-wide; default when the host is localhost.
+   * Accept the dev shop's self-signed certificate on the connections to the shop; default when
+   * the host is localhost. Every other connection of the process (testnet RPC, faucets) keeps
+   * checking certificates.
    */
   allowSelfSigned?: boolean;
+}
+
+/**
+ * The connections for the shop's requests: for an HTTPS shop whose self-signed certificate is
+ * allowed (by default on localhost), an agent that accepts it on connections to the shop's origin
+ * only. A redirect followed to any other origin gets a connection that checks certificates.
+ * Otherwise none, and the requests take the process's default.
+ */
+export function shopDispatcher(baseUrl: string, allowSelfSigned?: boolean): Agent | undefined {
+  const url = new URL(baseUrl);
+  const local = ['localhost', '127.0.0.1'].includes(url.hostname);
+  if (url.protocol !== 'https:' || !(allowSelfSigned ?? local)) return undefined;
+  return new Agent({
+    factory: (origin, options) =>
+      new URL(String(origin)).origin === url.origin
+        ? new Pool(origin, { ...options, connect: { rejectUnauthorized: false } })
+        : new Pool(origin, options),
+  });
 }
 
 /** Magento's method code per chain and asset: one payment method per catalogue asset (module 1.2.0 for Xahau). */
@@ -87,13 +107,18 @@ export class MagentoDriver implements Driver {
   private currency?: string;
   private testProductSku?: string;
   private readonly assetOf = new Map<string, string>();
+  private readonly dispatcher: Agent | undefined;
 
   constructor(private readonly options: MagentoOptions) {
-    const url = new URL(options.baseUrl);
-    const local = ['localhost', '127.0.0.1'].includes(url.hostname);
-    if (url.protocol === 'https:' && (options.allowSelfSigned ?? local)) {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
-    }
+    this.dispatcher = shopDispatcher(options.baseUrl, options.allowSelfSigned);
+  }
+
+  /**
+   * `httpFetch` over the shop's connections. They accept the dev shop's certificate on the shop's
+   * origin only; any other URL, directly or by redirect, has its certificate checked.
+   */
+  shopFetch(input: string | URL, init: RequestInit = {}): Promise<Response> {
+    return httpFetch(input, this.dispatcher ? ({ ...init, dispatcher: this.dispatcher } as RequestInit) : init);
   }
 
   /**
@@ -157,7 +182,7 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
   }
 
   async paymentPage(order: PlacedOrder): Promise<PaymentPageView> {
-    const response = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
+    const response = await this.shopFetch(this.pageUrl(order), { redirect: 'manual' });
     if (response.status !== 200) throw new Error(`Magento: payment page answered ${response.status}`);
     const html = await response.text();
     const page = readPaymentPage(html);
@@ -166,13 +191,13 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
   }
 
   async status(order: PlacedOrder): Promise<StatusPayload> {
-    const response = await httpFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
+    const response = await this.shopFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
     if (!response.ok) throw new Error(`Magento: status endpoint answered ${response.status}`);
     return (await response.json()) as StatusPayload;
   }
 
   async statusResponse(order: PlacedOrder): Promise<{ status: number; body: string }> {
-    const response = await httpFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
+    const response = await this.shopFetch(this.statusUrl(order), { headers: { Accept: 'application/json' } });
     return { status: response.status, body: await response.text() };
   }
 
@@ -181,7 +206,7 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
   }
 
   async pageResponse(order: PlacedOrder): Promise<{ status: number }> {
-    const response = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
+    const response = await this.shopFetch(this.pageUrl(order), { redirect: 'manual' });
     return { status: response.status };
   }
 
@@ -190,12 +215,12 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
    * Magento rendered, from the session that rendered it — so the page's cookies travel along.
    */
   async refresh(order: PlacedOrder): Promise<void> {
-    const page = await httpFetch(this.pageUrl(order), { redirect: 'manual' });
+    const page = await this.shopFetch(this.pageUrl(order), { redirect: 'manual' });
     const html = await page.text();
     const formKey = html.match(/name="form_key" value="([^"]+)"/)?.[1];
     if (!formKey) throw new Error(`Magento: the payment page for order ${order.id} shows no form key`);
     const cookies = page.headers.getSetCookie().map((c) => c.split(';')[0]).join('; ');
-    const response = await httpFetch(`${this.options.baseUrl}/ledger-direct/payment/refresh`, {
+    const response = await this.shopFetch(`${this.options.baseUrl}/ledger-direct/payment/refresh`, {
       method: 'POST',
       headers: cookies ? { Cookie: cookies } : {},
       body: new URLSearchParams({ form_key: formKey, id: order.id, key: order.secret }),
@@ -295,7 +320,7 @@ echo json_encode([
   private async ensureTestProduct(): Promise<string> {
     if (this.testProductSku) return this.testProductSku;
     const sku = this.options.testProductSku ?? 'LD-E2E-001';
-    const existing = await httpFetch(`${this.options.baseUrl}/rest/V1/products/${encodeURIComponent(sku)}`, { headers: { Authorization: `Bearer ${await this.token()}` } });
+    const existing = await this.shopFetch(`${this.options.baseUrl}/rest/V1/products/${encodeURIComponent(sku)}`, { headers: { Authorization: `Bearer ${await this.token()}` } });
     if (existing.status !== 200) {
       await this.admin('POST', '/rest/V1/products', {
         product: {
@@ -373,7 +398,7 @@ echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transaction
   private async request(method: string, path: string, body?: unknown, token?: string): Promise<unknown> {
     const headers: Record<string, string> = { Accept: 'application/json', 'Content-Type': 'application/json' };
     if (token) headers.Authorization = `Bearer ${token}`;
-    const response = await httpFetch(`${this.options.baseUrl}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+    const response = await this.shopFetch(`${this.options.baseUrl}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
     const text = await response.text();
     if (!response.ok) throw new Error(`Magento REST ${method} ${path} answered ${response.status}: ${text.slice(0, 300)}`);
     return text ? JSON.parse(text) : null;
@@ -381,7 +406,7 @@ echo json_encode(['hashes' => array_map(static fn ($t) => $t->hash, $transaction
 
   private async token(): Promise<string> {
     if (this.adminToken) return this.adminToken;
-    const response = await httpFetch(`${this.options.baseUrl}/rest/V1/integration/admin/token`, {
+    const response = await this.shopFetch(`${this.options.baseUrl}/rest/V1/integration/admin/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: this.options.adminUser ?? 'john.smith', password: this.options.adminPassword ?? 'password123' }),

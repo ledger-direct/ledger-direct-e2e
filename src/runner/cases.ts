@@ -242,7 +242,8 @@ RUNNERS['PS-10'] = async (ctx) => {
   const redirect = settled.redirect as string;
   ctx.note(`redirect: ${redirect}`);
   ctx.expect(!/finalize-transaction|_sw_payment_token=/.test(redirect), 'redirect does not lead into the expired return URL');
-  const landing = await httpFetch(redirect, { redirect: 'manual', headers: { Accept: 'text/html' } });
+  const init: RequestInit = { redirect: 'manual', headers: { Accept: 'text/html' } };
+  const landing = await (ctx.driver.shopFetch ? ctx.driver.shopFetch(redirect, init) : httpFetch(redirect, init));
   ctx.expect(landing.status < 400, `the redirect target answers ${landing.status}, not an error page`);
   const evidence = await platformState(ctx, order);
   ctx.expect(evidence.paid === true, 'order is in the paid state');
