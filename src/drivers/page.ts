@@ -86,6 +86,12 @@ function isState(value: string): value is State {
   return (STATES as readonly string[]).includes(value);
 }
 
+const ENTITIES: Record<string, string> = { amp: '&', quot: '"', '#39': "'", '#039': "'", lt: '<', gt: '>' };
+
+/**
+ * The entities the platforms' escaping produces, decoded in one pass: each is decoded exactly
+ * once, so an escaped entity (`&amp;lt;`) stays an entity (`&lt;`) instead of becoming `<`.
+ */
 function decode(value: string): string {
-  return value.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#0?39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+  return value.replace(/&(amp|quot|#0?39|lt|gt);/g, (_, name: string) => ENTITIES[name]);
 }

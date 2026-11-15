@@ -69,6 +69,14 @@ describe('readPaymentPage', () => {
     expect(readPaymentPage(legacyOnly)).toBeUndefined();
   });
 
+  it('decodes every entity exactly once, so an escaped entity stays an entity', () => {
+    const page = readPaymentPage(contract.replace(
+      'data-ld-poll-url="/status?state=waiting&amp;then=settled"',
+      'data-ld-poll-url="/status?q=&amp;lt;b&amp;gt;&amp;amp;&amp;quot;&amp;#039;&amp;#39;&amp;then=&lt;b&gt;&quot;&#039;&#39;"',
+    ));
+    expect(page?.pollUrl).toBe(`/status?q=&lt;b&gt;&amp;&quot;&#039;&#39;&then=<b>"''`);
+  });
+
   it('refuses a page without a known state or without the fields', () => {
     expect(readPaymentPage('<div data-ld-state="paid"></div>')).toBeUndefined();
     expect(readPaymentPage('<div>no page here</div>')).toBeUndefined();
