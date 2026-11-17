@@ -8,6 +8,12 @@ export interface Evidence {
   explorer?: string;
 }
 
+/**
+ * A case left the shop in a state no further case may run on: PS-13…15 could not put the
+ * run's receiving account back. runCases records the case as failed and the rest as not run.
+ */
+export class RunAborted extends Error {}
+
 export class CaseContext {
   readonly evidence: Evidence[] = [];
   readonly states: string[] = [];

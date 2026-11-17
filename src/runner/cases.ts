@@ -1,7 +1,7 @@
 import { halfOf } from '../amounts.js';
 import { readPlatformState } from '../drivers/platform.js';
 import { httpFetch } from '../http.js';
-import { CaseContext, sleep } from './context.js';
+import { CaseContext, RunAborted, sleep } from './context.js';
 import { refusalLeaks } from './refusal.js';
 import type { AccountFinding, StatusPayload } from '../drivers/driver.js';
 
@@ -326,14 +326,36 @@ async function withReceivingAccount(ctx: CaseContext, account: string, check: (o
   const offeredAssets = ctx.driver.offeredAssets;
   const accountFindings = ctx.driver.accountFindings;
   if (!offeredAssets || !accountFindings) throw new Error(`${ctx.driver.name} cannot read the checkout and the configuration`);
-  await ctx.reconfigure({ destinationAccount: account });
   try {
+    // Inside the try: a configure that fails half-way (account written, methods not) is put back too.
+    await ctx.reconfigure({ destinationAccount: account });
     const offered = await offeredAssets.call(ctx.driver);
     const findings = await accountFindings.call(ctx.driver, ctx.ledger.chain);
     ctx.note(`checkout offers ${offered.join(', ') || 'nothing'}; configuration: ${findings.map((f) => f.code + (f.asset ? ` ${f.asset}` : '')).join(', ') || 'nothing'}`);
     check(offered, findings);
   } finally {
-    await ctx.reconfigure({});
+    try {
+      await ctx.reconfigure({});
+    } catch (error) {
+      // The shop may still point at the case's account: no further case may run on it.
+      throw new RunAborted(`the run's receiving account could not be put back after ${account} (${error instanceof Error ? error.message : String(error)}); the shop may point at either`);
+    }
+  }
+}
+
+/**
+ * Runs `body` with a funded account of the case's own, and returns that account to the
+ * treasury afterwards — unless the shop may still point at it (RunAborted).
+ */
+async function withOwnAccount(ctx: CaseContext, seed: string, body: () => Promise<void>): Promise<void> {
+  let aborted = false;
+  try {
+    await body();
+  } catch (error) {
+    aborted = error instanceof RunAborted;
+    throw error;
+  } finally {
+    if (!aborted) await ctx.returnToTreasury(seed);
   }
 }
 
@@ -342,17 +364,13 @@ const issuedCodes = (ctx: CaseContext): string[] => ctx.ledger.assets().filter((
 RUNNERS['PS-13'] = async (ctx) => {
   const fresh = await ctx.ledger.createFresh({ trustlines: false });
   ctx.note(`account without trust lines: ${fresh.address}`);
-  try {
-    await withReceivingAccount(ctx, fresh.address, (offered, findings) => {
-      ctx.expect(offered.includes(ctx.ledger.nativeAsset), `the checkout offers ${ctx.ledger.nativeAsset}`);
-      for (const asset of issuedCodes(ctx)) {
-        ctx.expect(!offered.includes(asset), `the checkout does not offer ${asset}`);
-        ctx.expect(findings.some((f) => f.code === 'trustline_missing' && f.asset === asset && f.blocksOffer), `the configuration names the missing ${asset} trust line, as blocking`);
-      }
-    });
-  } finally {
-    await ctx.returnToTreasury(fresh.seed);
-  }
+  await withOwnAccount(ctx, fresh.seed, () => withReceivingAccount(ctx, fresh.address, (offered, findings) => {
+    ctx.expect(offered.includes(ctx.ledger.nativeAsset), `the checkout offers ${ctx.ledger.nativeAsset}`);
+    for (const asset of issuedCodes(ctx)) {
+      ctx.expect(!offered.includes(asset), `the checkout does not offer ${asset}`);
+      ctx.expect(findings.some((f) => f.code === 'trustline_missing' && f.asset === asset && f.blocksOffer), `the configuration names the missing ${asset} trust line, as blocking`);
+    }
+  }));
 };
 
 RUNNERS['PS-14'] = async (ctx) => {
@@ -373,7 +391,7 @@ RUNNERS['PS-15'] = async (ctx) => {
   const requireDepositAuth = ctx.ledger.requireDepositAuth;
   if (!requireDepositAuth) throw new Error(`${ctx.ledger.chain} has no deposit authorization`);
   const fresh = await ctx.ledger.createFresh({ trustlines: true });
-  try {
+  await withOwnAccount(ctx, fresh.seed, async () => {
     const set = await requireDepositAuth.call(ctx.ledger, fresh.seed);
     ctx.evidence.push({ kind: 'tx', text: `AccountSet asfDepositAuth on ${fresh.address} → ${set.result}`, hash: set.hash, explorer: set.explorer });
     ctx.expect(set.result === 'tesSUCCESS', 'deposit authorization is set on the account');
@@ -382,7 +400,5 @@ RUNNERS['PS-15'] = async (ctx) => {
       ctx.expect(all.every((asset) => offered.includes(asset)), `the checkout offers every asset (${offered.join(', ')})`);
       ctx.expect(findings.length === 1 && findings[0].code === 'deposit_auth' && !findings[0].blocksOffer, 'the configuration warns about deposit authorization, not blocking');
     });
-  } finally {
-    await ctx.returnToTreasury(fresh.seed);
-  }
+  });
 };
