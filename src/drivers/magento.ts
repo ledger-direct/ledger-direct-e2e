@@ -2,9 +2,10 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Agent, Pool } from 'undici';
-import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import type { AccountFinding, Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
+import { CaseSkipped } from '../runner/context.js';
 import { orderChain } from './chains.js';
 import { throttleKeys } from './throttle.js';
 
@@ -157,14 +158,14 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
     return (r.items ?? []).map((p) => ({ id: p.sku, number: p.sku, name: p.name, price: String(p.price), currency }));
   }
 
-  async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
-    const chain = orderChain(options.chain, this.chain, asset, Object.fromEntries(Object.entries(PAYMENT_METHODS).map(([c, m]) => [c, Object.keys(m)])));
-    const method = PAYMENT_METHODS[chain][asset];
-    const sku = options.productId ?? this.testProductSku ?? (await this.ensureTestProduct());
-
-    // A guest, every time: the catalogue's PS-06 is the rule, not the exception.
+  /**
+   * A guest's cart with the article, addresses and the cheapest shipping method: what the
+   * checkout has when it lists the payment methods. A guest, every time: the catalogue's PS-06
+   * is the rule, not the exception.
+   */
+  private async guestCartWithShipping(sku: string, quantity: number): Promise<{ cartId: string; address: Record<string, unknown> & { email: string } }> {
     const cartId = (await this.rest('POST', '/rest/V1/guest-carts')) as string;
-    await this.rest('POST', `/rest/V1/guest-carts/${cartId}/items`, { cartItem: { sku, qty: options.quantity ?? 1, quote_id: cartId } });
+    await this.rest('POST', `/rest/V1/guest-carts/${cartId}/items`, { cartItem: { sku, qty: quantity, quote_id: cartId } });
     const stamp = Date.now();
     const address = { firstname: 'E2E', lastname: `Run ${stamp}`, street: ['Testweg 1'], city: 'Berlin', postcode: '10115', country_id: 'DE', telephone: '000', email: `e2e-${stamp}@example.invalid` };
     const methods = (await this.rest('POST', `/rest/V1/guest-carts/${cartId}/estimate-shipping-methods`, { address: { country_id: address.country_id, postcode: address.postcode } })) as Array<{ carrier_code: string; method_code: string; amount: number; available: boolean }>;
@@ -173,6 +174,43 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
     await this.rest('POST', `/rest/V1/guest-carts/${cartId}/shipping-information`, {
       addressInformation: { shipping_address: address, billing_address: address, shipping_carrier_code: shipping.carrier_code, shipping_method_code: shipping.method_code },
     });
+    return { cartId, address };
+  }
+
+  /**
+   * The payment methods a guest's checkout offers for a cart of the test article (the module's
+   * payment_method_is_active observer, plugin with core 0.12), as the configured chain's assets.
+   */
+  async offeredAssets(): Promise<string[]> {
+    const { cartId } = await this.guestCartWithShipping(this.testProductSku ?? (await this.ensureTestProduct()), 1);
+    const listed = (await this.rest('GET', `/rest/V1/guest-carts/${cartId}/payment-methods`)) as Array<{ code: string }>;
+    const codes = new Set(listed.map((m) => m.code));
+    return Object.entries(PAYMENT_METHODS[this.chain] ?? {}).filter(([, code]) => codes.has(code)).map(([asset]) => asset);
+  }
+
+  /** What the configuration says about the chain's saved receiving account, as the core's findings. */
+  async accountFindings(chain: string): Promise<AccountFinding[]> {
+    const r = (await this.php(`${BOOTSTRAP}
+$chains = $om->get('Hardcastle\\LedgerDirect\\Model\\ChainServices');
+if (!method_exists($chains, 'accountCheck')) { echo json_encode(['missing' => true]), "\\n"; return; }
+$config = $om->get('Hardcastle\\LedgerDirect\\Port\\MagentoConfigProvider');
+$chain = $argv[1];
+$assets = [];
+foreach (\\Hardcastle\\LedgerDirect\\Core\\ChainCatalog::chain($chain)->assets as $asset) {
+  if ($config->isAssetEnabled($chain, $asset->code)) { $assets[] = $asset->code; }
+}
+$assessment = $chains->accountCheck($chain)->assess($config->getDestinationAccount($chain), $config->getNetwork($chain), $assets);
+echo json_encode(['findings' => array_map(static fn ($f) => ['code' => $f->code, 'asset' => $f->asset, 'blocksOffer' => $f->blocksOffer], $assessment->findings)]), "\\n";`, chain.toUpperCase())) as { findings?: AccountFinding[] };
+    if (!r.findings) throw new CaseSkipped('the module has no receiving-account check (needs core 0.12)');
+    return r.findings;
+  }
+
+  async placeOrder(asset: string, options: OrderOptions = {}): Promise<PlacedOrder> {
+    const chain = orderChain(options.chain, this.chain, asset, Object.fromEntries(Object.entries(PAYMENT_METHODS).map(([c, m]) => [c, Object.keys(m)])));
+    const method = PAYMENT_METHODS[chain][asset];
+    const sku = options.productId ?? this.testProductSku ?? (await this.ensureTestProduct());
+
+    const { cartId, address } = await this.guestCartWithShipping(sku, options.quantity ?? 1);
     const orderId = String(await this.rest('POST', `/rest/V1/guest-carts/${cartId}/payment-information`, { email: address.email, paymentMethod: { method } }));
 
     // The per-order key Magento generates for guest access to an order.
