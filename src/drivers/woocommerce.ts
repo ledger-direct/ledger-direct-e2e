@@ -104,7 +104,8 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
     const r = (await this.wp(`<?php
 $gateway = '\\Hardcastle\\LedgerDirect\\Woocommerce\\LedgerDirectPaymentGateway';
 if (!method_exists($gateway, 'offered_payment_types')) { echo json_encode(['missing' => true]), "\\n"; return; }
-echo json_encode(['types' => $gateway::offered_payment_types(ledger_direct_get_configuration())]), "\\n";`)) as { types?: string[] };
+// array_values(): a filtered list with gaps in its keys would be encoded as an object, not a list.
+echo json_encode(['types' => array_values($gateway::offered_payment_types(ledger_direct_get_configuration()))]), "\\n";`)) as { types?: string[] };
     if (!r.types) throw new CaseSkipped('the plugin has no receiving-account check (needs core 0.12)');
     const typeToAsset = Object.fromEntries(Object.entries(PAYMENT_TYPES[this.chain] ?? {}).map(([asset, type]) => [type, asset]));
     return r.types.map((t) => typeToAsset[t]).filter((a): a is string => a !== undefined);
