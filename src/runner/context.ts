@@ -33,6 +33,21 @@ export class CaseContext {
     await this.driver.configure({ ...this.shop, ...changes });
   }
 
+  /**
+   * Sends a case's own account back to the treasury (PS-13, PS-15), as the run does with its
+   * throwaway account; a chain without sweep() leaves it. A failure is noted, not thrown: the
+   * case's result does not depend on the money coming back.
+   */
+  async returnToTreasury(seed: string): Promise<void> {
+    if (!this.ledger.sweep) return;
+    try {
+      const swept = await this.ledger.sweep(seed, this.ledger.addressOf(this.payerSeed));
+      this.note(`returned to the treasury: ${swept.native} ${this.ledger.nativeAsset}${swept.failed.length > 0 ? `, failed: ${swept.failed.join(", ")}` : ""}`);
+    } catch (error) {
+      this.note(`could not return the case's account to the treasury: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   note(text: string): void {
     this.evidence.push({ kind: 'note', text });
     this.log(text);

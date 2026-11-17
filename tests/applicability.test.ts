@@ -32,3 +32,38 @@ describe("a selection that is not this platform's", () => {
     expect(report.receivingAccount).toBe('');
   });
 });
+
+/**
+ * PS-13…15 read the checkout and the configuration, and PS-14/15 need the ledger to put the
+ * account in its state. A driver or a ledger without that records the case as skipped, again
+ * without touching the shop: the plugin does not check the receiving account yet.
+ */
+describe('the receiving-account cases on a driver or ledger that cannot do them', () => {
+  const touched: string[] = [];
+  const ledger = {
+    chain: 'STELLAR',
+    nativeAsset: 'XLM',
+    assets: () => [{ code: 'XLM', native: true }, { code: 'USDC', native: false }],
+    createFresh: async () => { touched.push('createFresh'); return { address: 'GFresh' }; },
+    unfundedAddress: () => 'GNOBODY',
+    close: async () => {},
+  } as unknown as Ledger;
+
+  it('skips all three for a driver that cannot read the checkout and the configuration', async () => {
+    const driver = { name: 'prestashop', configure: async () => { touched.push('configure'); } } as unknown as Driver;
+    const report = await runCases({ driver, ledger, baseUrl: 'http://shop.test', caseIds: ['PS-13', 'PS-14', 'PS-15'], timeoutMs: 1000, version: 'test', log: () => {} });
+
+    expect(report.results.map((r) => [r.id, r.outcome])).toEqual([['PS-13', 'skip'], ['PS-14', 'skip'], ['PS-15', 'skip']]);
+    expect(report.results[0].reason).toMatch(/prestashop driver cannot read offeredAssets, accountFindings/);
+    expect(touched).toEqual([]);
+  });
+
+  it('skips deposit authorization on a chain without it', async () => {
+    const driver = { name: 'shopware', offeredAssets: async () => [], accountFindings: async () => [], configure: async () => { touched.push('configure'); } } as unknown as Driver;
+    const report = await runCases({ driver, ledger, baseUrl: 'http://shop.test', caseIds: ['PS-15'], timeoutMs: 1000, version: 'test', log: () => {} });
+
+    expect(report.results[0]).toMatchObject({ id: 'PS-15', outcome: 'skip' });
+    expect(report.results[0].reason).toMatch(/STELLAR has no requireDepositAuth/);
+    expect(touched).toEqual([]);
+  });
+});

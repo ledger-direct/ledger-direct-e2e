@@ -66,6 +66,17 @@ export interface PaymentPageView {
   issuer?: string;
 }
 
+/**
+ * One thing the plugin's configuration says about the receiving account — the core's
+ * `Account\Finding` (INVARIANTS.md, "Receiving account"): `trustline_missing`,
+ * `account_missing`, `deposit_auth`, … with the asset it concerns, null for the account.
+ */
+export interface AccountFinding {
+  code: string;
+  asset: string | null;
+  blocksOffer: boolean;
+}
+
 export interface StatusPayload {
   schema_version: number;
   state: State;
@@ -118,6 +129,17 @@ export interface Driver {
   pageResponse(order: PlacedOrder): Promise<{ status: number }>;
   refresh(order: PlacedOrder): Promise<void>;
   close(order: PlacedOrder): Promise<void>;
+  /**
+   * The assets the checkout offers right now on the configured chain, as a guest sees the
+   * list of payment methods (PS-13…15). Absent on a platform that does not check the
+   * receiving account yet: the cases are skipped there.
+   */
+  offeredAssets?(): Promise<string[]>;
+  /**
+   * What the plugin's configuration screen says about the chain's saved receiving account
+   * (PS-13…15). Absent like offeredAssets().
+   */
+  accountFindings?(chain: string): Promise<AccountFinding[]>;
   /** Whatever settles orders without a browser: cron URL, scheduled task, WP-cron. Returns what it answered. */
   safetyNet(): Promise<unknown>;
   /**

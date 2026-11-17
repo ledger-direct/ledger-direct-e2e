@@ -43,6 +43,10 @@ export async function runCases(options: RunOptions): Promise<Report> {
     if (spec.needsIssuedAssets !== undefined && issued < spec.needsIssuedAssets) {
       return skip(`needs ${spec.needsIssuedAssets} issued assets on ${ledger.chain}, which has ${issued}`);
     }
+    const driverMissing = (spec.needsDriver ?? []).filter((m) => typeof options.driver[m] !== 'function');
+    if (driverMissing.length > 0) return skip(`the ${options.driver.name} driver cannot read ${driverMissing.join(', ')} yet (the plugin does not check the receiving account)`);
+    const ledgerMissing = (spec.needsLedger ?? []).filter((m) => typeof ledger[m] !== 'function');
+    if (ledgerMissing.length > 0) return skip(`${ledger.chain} has no ${ledgerMissing.join(', ')}`);
     return null;
   };
 

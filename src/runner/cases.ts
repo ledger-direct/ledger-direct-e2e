@@ -3,7 +3,7 @@ import { readPlatformState } from '../drivers/platform.js';
 import { httpFetch } from '../http.js';
 import { CaseContext, sleep } from './context.js';
 import { refusalLeaks } from './refusal.js';
-import type { StatusPayload } from '../drivers/driver.js';
+import type { AccountFinding, StatusPayload } from '../drivers/driver.js';
 
 export type CaseRunner = (ctx: CaseContext) => Promise<void>;
 
@@ -314,3 +314,75 @@ RUNNERS['PS-12'] = async (ctx) => {
   ctx.expect(afterwards.status === 410, `quote refuses an order that no longer waits with 410 (got ${afterwards.status})`);
 };
 
+
+/**
+ * PS-13…15 — the receiving account in a state a merchant's real account is often in on
+ * mainnet, and the harness's ideal accounts never are (Documentation/Mainnet-Testing.md, K3;
+ * core INVARIANTS.md, "Receiving account"). Each case points the shop at such an account,
+ * reads what the checkout offers and what the configuration says, and puts the run's own
+ * account back — also when an expectation fails.
+ */
+async function withReceivingAccount(ctx: CaseContext, account: string, check: (offered: string[], findings: AccountFinding[]) => void): Promise<void> {
+  const offeredAssets = ctx.driver.offeredAssets;
+  const accountFindings = ctx.driver.accountFindings;
+  if (!offeredAssets || !accountFindings) throw new Error(`${ctx.driver.name} cannot read the checkout and the configuration`);
+  await ctx.reconfigure({ destinationAccount: account });
+  try {
+    const offered = await offeredAssets.call(ctx.driver);
+    const findings = await accountFindings.call(ctx.driver, ctx.ledger.chain);
+    ctx.note(`checkout offers ${offered.join(', ') || 'nothing'}; configuration: ${findings.map((f) => f.code + (f.asset ? ` ${f.asset}` : '')).join(', ') || 'nothing'}`);
+    check(offered, findings);
+  } finally {
+    await ctx.reconfigure({});
+  }
+}
+
+const issuedCodes = (ctx: CaseContext): string[] => ctx.ledger.assets().filter((a) => !a.native).map((a) => a.code);
+
+RUNNERS['PS-13'] = async (ctx) => {
+  const fresh = await ctx.ledger.createFresh({ trustlines: false });
+  ctx.note(`account without trust lines: ${fresh.address}`);
+  try {
+    await withReceivingAccount(ctx, fresh.address, (offered, findings) => {
+      ctx.expect(offered.includes(ctx.ledger.nativeAsset), `the checkout offers ${ctx.ledger.nativeAsset}`);
+      for (const asset of issuedCodes(ctx)) {
+        ctx.expect(!offered.includes(asset), `the checkout does not offer ${asset}`);
+        ctx.expect(findings.some((f) => f.code === 'trustline_missing' && f.asset === asset && f.blocksOffer), `the configuration names the missing ${asset} trust line, as blocking`);
+      }
+    });
+  } finally {
+    await ctx.returnToTreasury(fresh.seed);
+  }
+};
+
+RUNNERS['PS-14'] = async (ctx) => {
+  const address = ctx.ledger.unfundedAddress?.();
+  if (!address) throw new Error(`${ctx.ledger.chain} cannot make an unfunded address`);
+  ctx.note(`address nobody funded: ${address}`);
+  await withReceivingAccount(ctx, address, (offered, findings) => {
+    if (ctx.ledger.chain === 'STELLAR') {
+      ctx.expect(offered.length === 0, `the checkout offers nothing: a Stellar payment never creates its destination (offered: ${offered.join(', ') || 'nothing'})`);
+    } else {
+      ctx.expect(offered.length === 1 && offered[0] === ctx.ledger.nativeAsset, `the checkout offers ${ctx.ledger.nativeAsset} only (offered: ${offered.join(', ') || 'nothing'})`);
+    }
+    ctx.expect(findings.some((f) => f.code === 'account_missing' && f.asset === null), 'the configuration says the account is missing');
+  });
+};
+
+RUNNERS['PS-15'] = async (ctx) => {
+  const requireDepositAuth = ctx.ledger.requireDepositAuth;
+  if (!requireDepositAuth) throw new Error(`${ctx.ledger.chain} has no deposit authorization`);
+  const fresh = await ctx.ledger.createFresh({ trustlines: true });
+  try {
+    const set = await requireDepositAuth.call(ctx.ledger, fresh.seed);
+    ctx.evidence.push({ kind: 'tx', text: `AccountSet asfDepositAuth on ${fresh.address} → ${set.result}`, hash: set.hash, explorer: set.explorer });
+    ctx.expect(set.result === 'tesSUCCESS', 'deposit authorization is set on the account');
+    await withReceivingAccount(ctx, fresh.address, (offered, findings) => {
+      const all = ctx.ledger.assets().map((a) => a.code);
+      ctx.expect(all.every((asset) => offered.includes(asset)), `the checkout offers every asset (${offered.join(', ')})`);
+      ctx.expect(findings.length === 1 && findings[0].code === 'deposit_auth' && !findings[0].blocksOffer, 'the configuration warns about deposit authorization, not blocking');
+    });
+  } finally {
+    await ctx.returnToTreasury(fresh.seed);
+  }
+};

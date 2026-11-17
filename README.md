@@ -18,9 +18,11 @@ Testnet only. There is no mainnet URL in this code.
 
 ## The cases
 
-Twelve cases with fixed IDs from the LedgerDirect payment-status contract, platform-neutral but one:
+Fifteen cases with fixed IDs from the LedgerDirect payment-status contract, platform-neutral but one:
 PS-12 is Shopware's Store API and runs there only (a run against another platform records it as
-skipped). All twelve run unattended. Two are nightly-only: PS-04 needs the public testnet's issuers,
+skipped). PS-13 to PS-15 read the checkout and the configuration for a receiving account in a state
+the harness's own accounts are never in; a driver that cannot read them yet (a plugin that does not
+check the receiving account) records them as skipped. All fifteen run unattended. Two are nightly-only: PS-04 needs the public testnet's issuers,
 PS-10 waits 35 minutes for the payment token to expire. `--cases automated` is the set without those
 two, a dev-shop run in minutes; `--cases testnet` adds PS-04 and leaves out only the long wait, for a
 short run on the public testnet (a version tag); `--cases nightly` is every case; `--cases all` is the
@@ -40,6 +42,9 @@ whole catalogue, whatever has no runner recorded as skipped.
 | PS-10 | Late return | paid 35 minutes after checkout: settles, redirect goes to an order page, not an expired token |
 | PS-11 | Closed by the merchant | cancelled, paid anyway: redirect, no state change back to open |
 | PS-12 | Headless (Shopware) | as a guest without a session: `quote` over the Store API carries every value the payment page shows, `check` the contract; a wrong code is refused like an unknown order; paid: redirect to an absolute URL with the transaction hash (plugin 1.9.0); afterwards `quote` answers 410 |
+| PS-13 | Receiving account without trust lines | an activated account without trust lines: the checkout offers the native asset and no token; the configuration names each missing trust line (core 0.12) |
+| PS-14 | Receiving account not activated | an address nobody funded: XRPL/Xahau offer the native asset only (a payment from the base reserve up activates it), Stellar nothing; the configuration says the account is missing |
+| PS-15 | Deposit authorization | an account with trust lines and `DepositAuth`: everything is offered (pre-authorized senders may pay), the configuration warns |
 
 `ld-e2e cases list` and `ld-e2e cases show PS-05` print the catalogue.
 
