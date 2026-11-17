@@ -81,4 +81,12 @@ describe('mergeIntoBody', () => {
     expect(merged.body).not.toMatch(/^- \[ \] PS-12$/m);
     expect(merged.body).toContain('- [ ] PS-12 by hand: the Store API answers in German too');
   });
+
+  it('recognises its own earlier row for a case this catalogue does not know', () => {
+    const later: Report = { ...report, results: [{ id: 'PS-98', title: 'A case from a newer harness', target: 'prestashop', outcome: 'pass', startedAt: '2026-09-24T09:00:00.000Z', durationMs: 1, states: [], evidence: [] }] };
+    const earlier = body.replace('- [ ] PS-01 Waiting — nothing sent', '- [x] PS-98 A case from a newer harness — ld-e2e 0.1.0 on prestashop/XRPL, 2026-09-23 12:00 UTC');
+    const merged = mergeIntoBody(earlier, later);
+    expect(merged.body.match(/PS-98/g)).toHaveLength(1);
+    expect(merged.body).toContain('2026-09-24 09:00 UTC');
+  });
 });

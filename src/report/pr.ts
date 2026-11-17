@@ -57,13 +57,16 @@ export function mergeIntoBody(body: string, report: Report): { body: string; rep
 
 /**
  * What follows the case ID: nothing, or the case's title — alone or followed by what to do
- * (`PS-05 Settled — send the exact amount`), the form a PR template lists the cases in; a
- * row this tool wrote starts with the title too.
+ * (`PS-05 Settled — send the exact amount`), the form a PR template lists the cases in; or a
+ * row this tool wrote, by its `ld-e2e <version> on <target>/<chain>, <time> UTC` signature.
  */
 function isHarnessLine(rest: string, id: string): boolean {
   const text = rest.trim().toLowerCase();
   const title = (findCase(id)?.title ?? '').toLowerCase();
   if (text === '') return true;
+  // A row this tool wrote, recognised by its signature even when this catalogue does not know
+  // the case (a report from a newer harness, or an older one).
+  if (/\bld-e2e \S+ on [a-z0-9-]+\/[a-z]+, \d{4}-\d{2}-\d{2} \d{2}:\d{2} utc\b/.test(text)) return true;
   if (title === '' || !text.startsWith(title)) return false;
   const after = text.slice(title.length);
   return after === '' || /^\s*[—–:-]/.test(after);
