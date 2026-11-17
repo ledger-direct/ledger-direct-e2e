@@ -6,7 +6,7 @@ import { requireSeed } from '../config.js';
 import type { Driver, ShopConfig } from '../drivers/driver.js';
 import type { CaseResult, Report } from '../report/report.js';
 import { RUNNERS } from './cases.js';
-import { CaseContext } from './context.js';
+import { CaseContext, CaseSkipped, RunAborted } from './context.js';
 import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount, shopAccountVariables } from './defaults.js';
 
 export interface RunOptions {
@@ -43,6 +43,10 @@ export async function runCases(options: RunOptions): Promise<Report> {
     if (spec.needsIssuedAssets !== undefined && issued < spec.needsIssuedAssets) {
       return skip(`needs ${spec.needsIssuedAssets} issued assets on ${ledger.chain}, which has ${issued}`);
     }
+    const driverMissing = (spec.needsDriver ?? []).filter((m) => typeof options.driver[m] !== 'function');
+    if (driverMissing.length > 0) return skip(`the ${options.driver.name} driver cannot read ${driverMissing.join(', ')} yet (the plugin does not check the receiving account)`);
+    const ledgerMissing = (spec.needsLedger ?? []).filter((m) => typeof ledger[m] !== 'function');
+    if (ledgerMissing.length > 0) return skip(`${ledger.chain} has no ${ledgerMissing.join(', ')}`);
     return null;
   };
 
@@ -95,8 +99,15 @@ export async function runCases(options: RunOptions): Promise<Report> {
     const restoreTo = options.keepAccount ? undefined : (options.restoreAccount ?? defaultShopAccount(options.driver.name, ledger.chain));
 
     const results: CaseResult[] = [];
+    // Set when a case left the shop in a state no further case may run on (RunAborted).
+    let abortedBecause: string | undefined;
     for (const id of options.caseIds) {
       const spec = findCase(id);
+      if (abortedBecause !== undefined) {
+        results.push({ id, title: spec?.title ?? '?', target: options.driver.name, outcome: 'skip', reason: `not run: ${abortedBecause}`, startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] });
+        options.log(`${id}: not run, ${abortedBecause}`);
+        continue;
+      }
       const runner = RUNNERS[id.toUpperCase()];
       const caseStart = Date.now();
       const ctx = new CaseContext(options.driver, ledger, payerSeed, options.timeoutMs, (line) => options.log(`  ${id}: ${line}`), shop);
@@ -117,8 +128,14 @@ export async function runCases(options: RunOptions): Promise<Report> {
         options.log(`  ${id}: pass`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
+        if (error instanceof CaseSkipped) {
+          results.push({ id, title: spec.title, target: options.driver.name, outcome: 'skip', reason, startedAt: new Date(caseStart).toISOString(), durationMs: Date.now() - caseStart, states: ctx.states, evidence: ctx.evidence });
+          options.log(`  ${id}: skipped, ${reason}`);
+          continue;
+        }
         results.push({ id, title: spec.title, target: options.driver.name, outcome: 'fail', reason, startedAt: new Date(caseStart).toISOString(), durationMs: Date.now() - caseStart, states: ctx.states, evidence: ctx.evidence });
         options.log(`  ${id}: FAIL ${reason}`);
+        if (error instanceof RunAborted) abortedBecause = reason;
       }
     }
 

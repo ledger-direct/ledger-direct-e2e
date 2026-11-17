@@ -1,4 +1,4 @@
-import type { Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from './chain.js';
+import type { AccountSetResult, Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from './chain.js';
 
 /**
  * The one place every payment passes before it is signed — `ld-e2e pay`, the
@@ -133,11 +133,17 @@ export class GuardedLedger implements Ledger {
    */
   readonly sweep?: (seed: string, to: string) => Promise<SweepResult>;
 
+  /** Neither spends from the treasury; present only when the inner ledger has them. */
+  readonly unfundedAddress?: () => string;
+  readonly requireDepositAuth?: (seed: string) => Promise<AccountSetResult>;
+
   constructor(
     private readonly inner: Ledger,
     private readonly guard: SpendGuard,
   ) {
     if (inner.sweep) this.sweep = (seed, to) => inner.sweep!(seed, to);
+    if (inner.unfundedAddress) this.unfundedAddress = () => inner.unfundedAddress!();
+    if (inner.requireDepositAuth) this.requireDepositAuth = (seed) => inner.requireDepositAuth!(seed);
   }
 
   get chain(): ChainId {

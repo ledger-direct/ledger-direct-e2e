@@ -7,7 +7,7 @@ export type { Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledg
 export { CHAINS, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
 export { GuardedLedger, SpendGuard, SpendLimitError, spendGuard } from './chains/spend.js';
 export { redact, requireSeed } from './config.js';
-export type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './drivers/driver.js';
+export type { AccountFinding, Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './drivers/driver.js';
 export { createDriver, isTarget, TARGETS, type DriverOverrides, type Target } from './drivers/factory.js';
 export { readPaymentPage, type PaymentPageFields } from './drivers/page.js';
 export { hasPlatformState, readPlatformState, type PlatformState } from './drivers/platform.js';

@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import type { AccountFinding, Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { orderChain } from './chains.js';
 import { readPaymentPage } from './page.js';
+import { CaseSkipped } from '../runner/context.js';
 
 const run = promisify(execFile);
 
@@ -107,6 +108,25 @@ export class ShopwareDriver implements Driver {
     for (const asset of assets) {
       await this.admin('PATCH', `/api/payment-method/${methodIdFor(chain, asset)}`, { active: true, salesChannels: [{ id: salesChannelId }] });
     }
+  }
+
+  /** The guest's list of payment methods, mapped back to the configured chain's assets. */
+  async offeredAssets(): Promise<string[]> {
+    const listed = (await this.store('POST', '/store-api/payment-method', { onlyAvailable: true })).body as { elements?: { id: string }[] };
+    const ids = new Set((listed.elements ?? []).map((m) => m.id));
+    return (ASSETS_BY_CHAIN[this.chain] ?? []).filter((asset) => ids.has(methodIdFor(this.chain, asset)));
+  }
+
+  /** The configuration card's check (plugin 1.11, core 0.12): GET /api/_action/ledger-direct/receiving-account/{chain}. */
+  async accountFindings(chain: string): Promise<AccountFinding[]> {
+    let answer: { findings?: AccountFinding[] };
+    try {
+      answer = await this.admin('GET', `/api/_action/ledger-direct/receiving-account/${chain.toUpperCase()}`) as { findings?: AccountFinding[] };
+    } catch (error) {
+      if (error instanceof Error && / answered 404/.test(error.message)) throw new CaseSkipped('the plugin has no receiving-account check (needs 1.11 with core 0.12)');
+      throw error;
+    }
+    return (answer.findings ?? []).map(({ code, asset, blocksOffer }) => ({ code, asset, blocksOffer }));
   }
 
   async findProducts(query: string): Promise<Product[]> {

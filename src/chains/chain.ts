@@ -87,6 +87,13 @@ export interface FreshAccount {
   trustlines: Record<string, string>;
 }
 
+export interface AccountSetResult {
+  hash: string;
+  /** tesSUCCESS when the flag is set. */
+  result: string;
+  explorer: string;
+}
+
 export interface Ledger {
   readonly chain: ChainId;
   readonly nativeAsset: string;
@@ -103,6 +110,16 @@ export interface Ledger {
    * `to`, the treasury. Optional: a chain without it leaves the account as it is.
    */
   sweep?(seed: string, to: string): Promise<SweepResult>;
+  /**
+   * A valid address nobody has funded: an account that does not exist on the ledger yet
+   * (PS-14). Its key is generated and thrown away. Optional.
+   */
+  unfundedAddress?(): string;
+  /**
+   * Sets deposit authorization on the account of `seed` (PS-15): from then on only
+   * pre-authorized senders can pay it. XRPL protocol only; not a payment, not charged.
+   */
+  requireDepositAuth?(seed: string): Promise<AccountSetResult>;
   /** Payments that arrived at `address`, newest first; with `identifier`, only those carrying it. */
   incoming(address: string, options?: { identifier?: string; limit?: number }): Promise<IncomingPayment[]>;
   explorerUrl(hash: string): string;

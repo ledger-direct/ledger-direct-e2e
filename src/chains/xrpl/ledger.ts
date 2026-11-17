@@ -1,5 +1,6 @@
-import { Client } from 'xrpl';
-import type { Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from '../chain.js';
+import { AccountSetAsfFlags, Client, Wallet } from 'xrpl';
+import type { AccountSetResult, Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from '../chain.js';
+import { submitWithRetry } from './submit.js';
 import { parseXrplIncoming } from './incoming.js';
 import { pay } from './payments.js';
 import { XRPL, type XrplProfile } from './profile.js';
@@ -92,6 +93,18 @@ export class XrplLedger implements Ledger {
 
   async sweep(seed: string, to: string): Promise<SweepResult> {
     return sweep(await this.connect(), seed, to, undefined, this.profile);
+  }
+
+  unfundedAddress(): string {
+    return Wallet.generate().classicAddress;
+  }
+
+  async requireDepositAuth(seed: string): Promise<AccountSetResult> {
+    const wallet = walletFromSeed(seed);
+    const answer = await submitWithRetry(await this.connect(), wallet, { TransactionType: 'AccountSet', Account: wallet.classicAddress, SetFlag: AccountSetAsfFlags.asfDepositAuth });
+    const meta = answer.result.meta;
+    const result = typeof meta === 'object' && meta !== null && 'TransactionResult' in meta ? String(meta.TransactionResult) : 'unknown';
+    return { hash: answer.result.hash, result, explorer: this.explorerUrl(answer.result.hash) };
   }
 
   async incoming(address: string, options: { identifier?: string; limit?: number } = {}): Promise<IncomingPayment[]> {

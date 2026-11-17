@@ -8,6 +8,19 @@ export interface Evidence {
   explorer?: string;
 }
 
+/**
+ * A case left the shop in a state no further case may run on: PS-13…15 could not put the
+ * run's receiving account back. runCases records the case as failed and the rest as not run.
+ */
+export class RunAborted extends Error {}
+
+/**
+ * The shop cannot answer what the case asks — a plugin version without the feature, found out
+ * only when asked (a route that answers 404, a helper without the command). runCases records the
+ * case as skipped with this reason, not as failed.
+ */
+export class CaseSkipped extends Error {}
+
 export class CaseContext {
   readonly evidence: Evidence[] = [];
   readonly states: string[] = [];
@@ -31,6 +44,21 @@ export class CaseContext {
   /** Re-points the shop with one setting changed; the caller restores it afterwards. */
   async reconfigure(changes: Partial<ShopConfig>): Promise<void> {
     await this.driver.configure({ ...this.shop, ...changes });
+  }
+
+  /**
+   * Sends a case's own account back to the treasury (PS-13, PS-15), as the run does with its
+   * throwaway account; a chain without sweep() leaves it. A failure is noted, not thrown: the
+   * case's result does not depend on the money coming back.
+   */
+  async returnToTreasury(seed: string): Promise<void> {
+    if (!this.ledger.sweep) return;
+    try {
+      const swept = await this.ledger.sweep(seed, this.ledger.addressOf(this.payerSeed));
+      this.note(`returned to the treasury: ${swept.native} ${this.ledger.nativeAsset}${swept.failed.length > 0 ? `, failed: ${swept.failed.join(", ")}` : ""}`);
+    } catch (error) {
+      this.note(`could not return the case's account to the treasury: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   note(text: string): void {

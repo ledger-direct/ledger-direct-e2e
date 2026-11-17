@@ -35,6 +35,11 @@ export class StellarLedger implements Ledger {
     return { address: kp.publicKey(), seed: kp.secret(), trustlines };
   }
 
+  /** A Stellar payment never creates its destination: this address can receive nothing (PS-14). */
+  unfundedAddress(): string {
+    return Keypair.random().publicKey();
+  }
+
   async fund(address: string): Promise<{ address: string; amount: string }> {
     const response = await httpFetch(`${TESTNET_FRIENDBOT}?addr=${encodeURIComponent(address)}`, {}, 60_000);
     if (!response.ok) throw new Error(`Friendbot answered ${response.status} ${response.statusText}`);
