@@ -148,10 +148,13 @@ ld-e2e report pr --repo owner/name --pr 15 --dry-run
 ld-e2e report pr --repo owner/name --pr 15
 ```
 
-The pull request stays the record. In its "Manual end-to-end tests" section, every line that starts
-with a case ID is replaced by the report's line for that case: ticked when it passed, with order
-reference and hashes; left open with the reason when it failed. Lines without an ID and every other
-section are untouched; a second run replaces its own lines. It runs as you, through `gh`.
+The pull request stays the record. In its "Manual end-to-end tests" section, a placeholder for a case
+(`- [ ] PS-05`, or with the case's title, `- [ ] PS-05 Settled — send the exact amount`) is replaced by
+the report's line for that case: ticked when it passed, with order reference and hashes; left open with
+the reason when it failed. A line that starts with a case ID but says something else (`- [ ] PS-14
+below the base reserve …`) is a check of its own and stays; the case's line is added next to it.
+Skipped cases are left out. Lines without an ID and every other section are untouched; a second run
+replaces its own lines. It runs as you, through `gh`.
 
 ## MCP server
 

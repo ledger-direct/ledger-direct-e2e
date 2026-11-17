@@ -59,4 +59,34 @@ describe('mergeIntoBody', () => {
   it('never carries a seed into a line', () => {
     for (const line of markdownLines(report).values()) expect(line).not.toMatch(/\bs[1-9A-HJ-NP-Za-km-z]{25,35}\b/);
   });
+
+  it('leaves a check of its own alone even when it starts with a case ID, and adds the result next to it', () => {
+    const own = body.replace('- [ ] PS-01 Waiting — nothing sent', '- [ ] PS-05 below the base reserve: XRP not offered');
+    const merged = mergeIntoBody(own, report);
+    expect(merged.body).toContain('- [ ] PS-05 below the base reserve: XRP not offered');
+    expect(merged.body).toContain('- [x] PS-05 Settled — order ABC');
+  });
+
+  it('leaves skipped cases out: a case that does not exist on the platform is no open item', () => {
+    const withSkip: Report = { ...report, results: [...report.results, { id: 'PS-12', title: 'Headless: quote and status over the Store API', target: 'prestashop', outcome: 'skip', reason: 'not a case for prestashop', startedAt: '2026-09-23T12:03:00.000Z', durationMs: 0, states: [], evidence: [] }] };
+    const merged = mergeIntoBody(body, withSkip);
+    expect(merged.body).not.toContain('PS-12');
+    expect(merged.missing).not.toContain('PS-12');
+  });
+
+  it('removes the placeholder of a skipped case, and keeps a check of its own for it', () => {
+    const withSkip: Report = { ...report, results: [...report.results, { id: 'PS-12', title: 'Headless: quote and status over the Store API', target: 'prestashop', outcome: 'skip', reason: 'not a case for prestashop', startedAt: '2026-09-23T12:03:00.000Z', durationMs: 0, states: [], evidence: [] }] };
+    const listed = body.replace('- [ ] PS-01 Waiting — nothing sent', '- [ ] PS-12\n- [ ] PS-12 by hand: the Store API answers in German too');
+    const merged = mergeIntoBody(listed, withSkip);
+    expect(merged.body).not.toMatch(/^- \[ \] PS-12$/m);
+    expect(merged.body).toContain('- [ ] PS-12 by hand: the Store API answers in German too');
+  });
+
+  it('recognises its own earlier row for a case this catalogue does not know', () => {
+    const later: Report = { ...report, results: [{ id: 'PS-98', title: 'A case from a newer harness', target: 'prestashop', outcome: 'pass', startedAt: '2026-09-24T09:00:00.000Z', durationMs: 1, states: [], evidence: [] }] };
+    const earlier = body.replace('- [ ] PS-01 Waiting — nothing sent', '- [x] PS-98 A case from a newer harness — ld-e2e 0.1.0 on prestashop/XRPL, 2026-09-23 12:00 UTC');
+    const merged = mergeIntoBody(earlier, later);
+    expect(merged.body.match(/PS-98/g)).toHaveLength(1);
+    expect(merged.body).toContain('2026-09-24 09:00 UTC');
+  });
 });
