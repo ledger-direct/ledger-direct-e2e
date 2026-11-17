@@ -21,6 +21,8 @@ const SECTION = /^##+\s+manual end-to-end tests\s*$/im;
  */
 export function mergeIntoBody(body: string, report: Report): { body: string; replaced: string[]; missing: string[] } {
   const lines = markdownLines({ ...report, results: report.results.filter((r) => r.outcome !== 'skip') });
+  // A skipped case's placeholder or earlier row is no open item either: those lines go.
+  const skipped = new Set(report.results.filter((r) => r.outcome === 'skip').map((r) => r.id.toUpperCase()));
   const replaced: string[] = [];
   const seen = new Set<string>();
   const sectionStart = body.search(SECTION);
@@ -29,16 +31,19 @@ export function mergeIntoBody(body: string, report: Report): { body: string; rep
     const appended = body.trimEnd() + '\n\n## Manual end-to-end tests\n\n' + [...lines.values()].join('\n') + '\n';
     return { body: appended, replaced: [], missing: [] };
   }
-  const out = body.split('\n').map((line, index) => {
-    if (index < body.slice(0, sectionStart).split('\n').length - 1) return line;
+  const headerLines = body.slice(0, sectionStart).split('\n').length - 1;
+  const out = body.split('\n').flatMap((line, index) => {
+    if (index < headerLines) return [line];
     const m = line.match(/^\s*-\s*\[[ xX]\]\s*(PS-\d{2})\b/);
-    if (!m) return line;
+    if (!m) return [line];
     const id = m[1].toUpperCase();
+    const ours = isHarnessLine(line.slice(m[0].length), id);
+    if (ours && skipped.has(id) && !lines.has(id)) return [];
     const replacement = lines.get(id);
-    if (!replacement || !isHarnessLine(line.slice(m[0].length), id)) return line;
+    if (!replacement || !ours) return [line];
     seen.add(id);
     replaced.push(id);
-    return replacement;
+    return [replacement];
   });
   const missing = [...lines.keys()].filter((id) => !seen.has(id));
   let text = out.join('\n');

@@ -73,4 +73,12 @@ describe('mergeIntoBody', () => {
     expect(merged.body).not.toContain('PS-12');
     expect(merged.missing).not.toContain('PS-12');
   });
+
+  it('removes the placeholder of a skipped case, and keeps a check of its own for it', () => {
+    const withSkip: Report = { ...report, results: [...report.results, { id: 'PS-12', title: 'Headless: quote and status over the Store API', target: 'prestashop', outcome: 'skip', reason: 'not a case for prestashop', startedAt: '2026-09-23T12:03:00.000Z', durationMs: 0, states: [], evidence: [] }] };
+    const listed = body.replace('- [ ] PS-01 Waiting — nothing sent', '- [ ] PS-12\n- [ ] PS-12 by hand: the Store API answers in German too');
+    const merged = mergeIntoBody(listed, withSkip);
+    expect(merged.body).not.toMatch(/^- \[ \] PS-12$/m);
+    expect(merged.body).toContain('- [ ] PS-12 by hand: the Store API answers in German too');
+  });
 });
