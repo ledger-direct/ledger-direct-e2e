@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { Wallet } from 'xrpl';
 import type { Ledger, SweepResult } from '../src/chains/chain.js';
 import type { AccountFinding, Driver, ShopConfig } from '../src/drivers/driver.js';
+import { CaseSkipped } from '../src/runner/context.js';
 import { runCases } from '../src/runner/run.js';
 import { isolateEnv } from './env.js';
 
@@ -22,6 +23,7 @@ describe('the receiving-account cases put the run account back, or stop the run'
   let sweeps: string[];
   let failRestore: boolean;
   let created: number;
+  let pluginTooOld: boolean;
 
   const ledger = {
     chain: 'XRPL',
@@ -47,7 +49,10 @@ describe('the receiving-account cases put the run account back, or stop the run'
       configured.push(which);
       if (failRestore && which === 'run' && configured.includes('case')) throw new Error('shop answered 500');
     },
-    offeredAssets: async () => ['XRP'],
+    offeredAssets: async () => {
+      if (pluginTooOld) throw new CaseSkipped('the plugin has no receiving-account check');
+      return ['XRP'];
+    },
     accountFindings: async (): Promise<AccountFinding[]> => [{ code: 'trustline_missing', asset: 'RLUSD', blocksOffer: true }],
   } as unknown as Driver;
 
@@ -58,6 +63,7 @@ describe('the receiving-account cases put the run account back, or stop the run'
     sweeps = [];
     failRestore = false;
     created = 0;
+    pluginTooOld = false;
     process.env.LEDGERDIRECT_TESTNET_XRPL_TREASURY_SEED = 'test-seed-placeholder';
   });
 
@@ -77,5 +83,15 @@ describe('the receiving-account cases put the run account back, or stop the run'
     expect(report.results[0].reason).toMatch(/could not be put back/);
     expect(report.results[1].reason).toMatch(/^not run: /);
     expect(sweeps).not.toContain('case');
+  });
+
+  it('records a case as skipped when the plugin cannot answer, and still cleans up', async () => {
+    pluginTooOld = true;
+    const report = await run();
+
+    expect(report.results.map((r) => [r.id, r.outcome])).toEqual([['PS-13', 'skip'], ['PS-14', 'skip'], ['PS-15', 'skip']]);
+    expect(report.results[0].reason).toMatch(/no receiving-account check/);
+    expect(configured.slice(0, 3)).toEqual(['run', 'case', 'run']);
+    expect(sweeps).toContain('case');
   });
 });

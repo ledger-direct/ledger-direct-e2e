@@ -6,7 +6,7 @@ import { requireSeed } from '../config.js';
 import type { Driver, ShopConfig } from '../drivers/driver.js';
 import type { CaseResult, Report } from '../report/report.js';
 import { RUNNERS } from './cases.js';
-import { CaseContext, RunAborted } from './context.js';
+import { CaseContext, CaseSkipped, RunAborted } from './context.js';
 import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount, shopAccountVariables } from './defaults.js';
 
 export interface RunOptions {
@@ -128,6 +128,11 @@ export async function runCases(options: RunOptions): Promise<Report> {
         options.log(`  ${id}: pass`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
+        if (error instanceof CaseSkipped) {
+          results.push({ id, title: spec.title, target: options.driver.name, outcome: 'skip', reason, startedAt: new Date(caseStart).toISOString(), durationMs: Date.now() - caseStart, states: ctx.states, evidence: ctx.evidence });
+          options.log(`  ${id}: skipped, ${reason}`);
+          continue;
+        }
         results.push({ id, title: spec.title, target: options.driver.name, outcome: 'fail', reason, startedAt: new Date(caseStart).toISOString(), durationMs: Date.now() - caseStart, states: ctx.states, evidence: ctx.evidence });
         options.log(`  ${id}: FAIL ${reason}`);
         if (error instanceof RunAborted) abortedBecause = reason;

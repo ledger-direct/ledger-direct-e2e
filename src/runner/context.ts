@@ -14,6 +14,13 @@ export interface Evidence {
  */
 export class RunAborted extends Error {}
 
+/**
+ * The shop cannot answer what the case asks — a plugin version without the feature, found out
+ * only when asked (a route that answers 404, a helper without the command). runCases records the
+ * case as skipped with this reason, not as failed.
+ */
+export class CaseSkipped extends Error {}
+
 export class CaseContext {
   readonly evidence: Evidence[] = [];
   readonly states: string[] = [];

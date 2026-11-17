@@ -5,6 +5,7 @@ import type { AccountFinding, Driver, HeadlessApi, OrderOptions, PaymentPageView
 import { httpFetch } from '../http.js';
 import { orderChain } from './chains.js';
 import { readPaymentPage } from './page.js';
+import { CaseSkipped } from '../runner/context.js';
 
 const run = promisify(execFile);
 
@@ -118,7 +119,13 @@ export class ShopwareDriver implements Driver {
 
   /** The configuration card's check (plugin 1.11, core 0.12): GET /api/_action/ledger-direct/receiving-account/{chain}. */
   async accountFindings(chain: string): Promise<AccountFinding[]> {
-    const answer = await this.admin('GET', `/api/_action/ledger-direct/receiving-account/${chain.toUpperCase()}`) as { findings?: AccountFinding[] };
+    let answer: { findings?: AccountFinding[] };
+    try {
+      answer = await this.admin('GET', `/api/_action/ledger-direct/receiving-account/${chain.toUpperCase()}`) as { findings?: AccountFinding[] };
+    } catch (error) {
+      if (error instanceof Error && / answered 404/.test(error.message)) throw new CaseSkipped('the plugin has no receiving-account check (needs 1.11 with core 0.12)');
+      throw error;
+    }
     return (answer.findings ?? []).map(({ code, asset, blocksOffer }) => ({ code, asset, blocksOffer }));
   }
 

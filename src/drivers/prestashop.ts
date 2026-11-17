@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { assertComposeDir, explainComposeError } from './compose.js';
-import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import type { AccountFinding, Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { orderChain } from './chains.js';
 import { readPaymentPage } from './page.js';
+import { CaseSkipped } from '../runner/context.js';
 
 const run = promisify(execFile);
 
@@ -49,6 +50,20 @@ export class PrestaShopDriver implements Driver {
       'quote-expiry': String(config.quoteExpirySeconds),
     })) as { cron_url: string };
     this.cronUrl = this.rebase(r.cron_url);
+  }
+
+  /** What hookPaymentOptions() offers for a cart of the test article, on the configured chain (helper `payment-options`). */
+  async offeredAssets(): Promise<string[]> {
+    const r = (await this.helper('payment-options', {})) as { offered?: Array<{ chain: string; asset: string }> };
+    if (!r.offered) throw new CaseSkipped('the module has no receiving-account check (dev/bin/e2e.php without payment-options)');
+    return r.offered.filter((o) => o.chain === this.chain).map((o) => o.asset);
+  }
+
+  /** What the settings screen says about the chain's saved receiving account (helper `account-check`). */
+  async accountFindings(chain: string): Promise<AccountFinding[]> {
+    const r = (await this.helper('account-check', { chain: chain.toUpperCase() })) as { findings?: AccountFinding[] };
+    if (!r.findings) throw new CaseSkipped('the module has no receiving-account check (dev/bin/e2e.php without account-check)');
+    return r.findings.map(({ code, asset, blocksOffer }) => ({ code, asset, blocksOffer }));
   }
 
   async findProducts(query: string): Promise<Product[]> {
