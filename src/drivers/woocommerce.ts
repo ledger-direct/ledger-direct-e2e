@@ -1,7 +1,8 @@
 import { spawn } from 'node:child_process';
-import type { Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import type { AccountFinding, Driver, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
 import { httpFetch } from '../http.js';
 import { readPaymentPage } from './page.js';
+import { CaseSkipped } from '../runner/context.js';
 import { orderChain } from './chains.js';
 import { throttleKeys } from './throttle.js';
 
@@ -96,6 +97,35 @@ echo json_encode(['ok' => true]), "\\n";`, JSON.stringify(settings));
     this.chain = chain;
     this.account = config.destinationAccount;
     await this.ensureTestProduct();
+  }
+
+  /** The payment types the checkout offers (offered_payment_types(), plugin with core 0.12), as the configured chain's assets. */
+  async offeredAssets(): Promise<string[]> {
+    const r = (await this.wp(`<?php
+$gateway = '\\Hardcastle\\LedgerDirect\\Woocommerce\\LedgerDirectPaymentGateway';
+if (!method_exists($gateway, 'offered_payment_types')) { echo json_encode(['missing' => true]), "\\n"; return; }
+// array_values(): a filtered list with gaps in its keys would be encoded as an object, not a list.
+echo json_encode(['types' => array_values($gateway::offered_payment_types(ledger_direct_get_configuration()))]), "\\n";`)) as { types?: string[] };
+    if (!r.types) throw new CaseSkipped('the plugin has no receiving-account check (needs core 0.12)');
+    const typeToAsset = Object.fromEntries(Object.entries(PAYMENT_TYPES[this.chain] ?? {}).map(([asset, type]) => [type, asset]));
+    return r.types.map((t) => typeToAsset[t]).filter((a): a is string => a !== undefined);
+  }
+
+  /** What the settings page says about the chain's saved receiving account, as the core's findings. */
+  async accountFindings(chain: string): Promise<AccountFinding[]> {
+    const r = (await this.wp(`<?php
+$factory = \\Hardcastle\\LedgerDirect\\Service\\ServiceFactory::getInstance();
+if (!method_exists($factory, 'getAccountInspector')) { echo json_encode(['missing' => true]), "\\n"; return; }
+$chain = $args[0];
+$config = $factory->getConfigProvider();
+$assets = [];
+foreach (\\Hardcastle\\LedgerDirect\\Core\\ChainCatalog::chain($chain)->assets as $asset) {
+  if ($config->isAssetEnabled($chain, $asset->code)) { $assets[] = $asset->code; }
+}
+$assessment = $factory->getAccountInspector($chain)->assess($config->getDestinationAccount($chain), $config->getNetwork($chain), $assets);
+echo json_encode(['findings' => array_map(static fn ($f) => ['code' => $f->code, 'asset' => $f->asset, 'blocksOffer' => $f->blocksOffer], $assessment->findings)]), "\\n";`, chain.toUpperCase())) as { findings?: AccountFinding[] };
+    if (!r.findings) throw new CaseSkipped('the plugin has no receiving-account check (needs core 0.12)');
+    return r.findings;
   }
 
   async findProducts(query: string): Promise<Product[]> {
