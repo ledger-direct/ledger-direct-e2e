@@ -22,6 +22,7 @@ export interface PaymentResult {
   delivered: string | null;
   explorer: string;
   from: string;
+  ledgerIndex?: number;
 }
 
 /**
@@ -65,6 +66,7 @@ export async function pay(client: Client, request: PaymentRequest, profile: Xrpl
     delivered: describeDelivered(metaObject.delivered_amount, profile.nativeAsset),
     explorer: profile.explorerTx + response.result.hash,
     from: wallet.classicAddress,
+    ledgerIndex: typeof response.result.ledger_index === 'number' ? response.result.ledger_index : undefined,
   };
 }
 

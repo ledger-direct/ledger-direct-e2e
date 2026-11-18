@@ -153,4 +153,6 @@ export interface Driver {
    * proven. Null when the platform cannot expose it; the case then falls back to timing.
    */
   nodeRequests(): Promise<number | null>;
+  /** The installed plugin's version, for a recording's manifest. Absent or null: not known. */
+  pluginVersion?(): Promise<string | null>;
 }

@@ -7,7 +7,10 @@ import { CHAINS, isChain, ledgerFor, treasurySeedVariable } from './chains/index
 import type { ChainId, Ledger } from './chains/chain.js';
 import { spendGuard } from './chains/spend.js';
 import { redact, requireSeed } from './config.js';
-import { TARGETS } from './drivers/factory.js';
+import { createDriver, TARGETS } from './drivers/factory.js';
+import { TRY_PRESETS } from './drivers/try.js';
+import { defaultOutDir, parseSize, RECORD_ASSETS, RECORD_DEFAULTS, RECORD_STARTS, recordChain } from './record/options.js';
+import { HARNESS_VERSION } from './version.js';
 import { hasPlatformState } from './drivers/platform.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
@@ -32,7 +35,7 @@ import { ShopSession } from './session.js';
  *   can show evidence instead of claiming success.
  */
 export function createServer(options: { session?: ShopSession } = {}): McpServer {
-  const server = new McpServer({ name: 'ledger-direct-e2e', version: '0.1.0' });
+  const server = new McpServer({ name: 'ledger-direct-e2e', version: HARNESS_VERSION });
   // Orders, drivers and paying what a page shows live in the session — the same kernel the lab uses.
   const session = options.session ?? new ShopSession();
   const freshSeeds = new Map<string, string>();
@@ -220,7 +223,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
       baseUrl: session.shop(target).baseUrl,
       caseIds: ids,
       timeoutMs: 240_000,
-      version: '0.1.0',
+      version: HARNESS_VERSION,
       log: (line) => job.log.push(redact(line)),
     }).then(async (result) => {
       await writeReport(result, report);
@@ -231,6 +234,42 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
       job.status = 'failed';
     });
     return text({ jobId, cases: ids, note: 'running in the background; poll job_status' });
+  });
+
+  server.registerTool('shop_record_purchase', {
+    title: 'Record a purchase',
+    description: 'Films a real testnet purchase in a headless browser (MP4, stills, recording.json with the transaction hash and when each moment happens) as a background job, like run_cases — a recording takes one to three minutes. Poll it with job_status. Needs Chrome (CHROME) and ffmpeg on this machine; with start "shop" also the plugin\'s dev/try/browser/walk.mjs.',
+    inputSchema: {
+      target: targetSchema,
+      try: z.boolean().default(false).describe("the plugin's try stack (dev/try) instead of the dev shop"),
+      asset: z.enum(RECORD_ASSETS).default(RECORD_DEFAULTS.asset),
+      start: z.enum(RECORD_STARTS).default(RECORD_DEFAULTS.start).describe('payment: from the payment page on; shop: the whole purchase from the home page'),
+      size: z.string().default(RECORD_DEFAULTS.size).describe('WIDTHxHEIGHT, e.g. 1280x720 or 1080x1080'),
+      chain: chainSchema,
+      out: z.string().optional().describe('output folder; default out/recordings/<target>-<asset>-<start>-<size>-<timestamp>'),
+      composeDir: z.string().optional().describe("the shop's compose folder (the plugin's dev/try for a try stack); default: the running container's"),
+    },
+  }, async ({ target, try: useTry, asset, start, size, chain, out, composeDir }) => {
+    const videoSize = parseSize(size);
+    const { driver, baseUrl } = createDriver(target, { try: useTry, composeDir });
+    const outDir = out ?? defaultOutDir(target, asset, start, videoSize, new Date());
+    const jobId = `record-${Date.now().toString(36)}`;
+    const job: { status: 'running' | 'done' | 'failed'; startedAt: string; log: string[]; result?: unknown; error?: string } = { status: 'running', startedAt: new Date().toISOString(), log: [] };
+    jobs.set(jobId, job);
+    void import('./record/record.js').then(({ recordPurchase }) => recordPurchase({
+      target, driver, baseUrl, try: useTry, chain: recordChain(asset, chain), asset, start, size: videoSize, outDir,
+      harnessVersion: HARNESS_VERSION,
+      composeDir,
+      container: useTry ? TRY_PRESETS[target].container : process.env.LD_E2E_SHOPWARE_CONTAINER,
+      log: (line) => job.log.push(redact(line)),
+    })).then((result) => {
+      job.result = { outDir: result.outDir, manifest: result.manifest };
+      job.status = 'done';
+    }).catch((error: unknown) => {
+      job.error = redact(error instanceof Error ? error.message : String(error));
+      job.status = 'failed';
+    });
+    return text({ jobId, outDir, note: 'recording in the background; poll job_status' });
   });
 
   server.registerTool('job_status', {
