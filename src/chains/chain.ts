@@ -44,6 +44,8 @@ export interface PaymentResult {
   delivered: string | null;
   explorer: string;
   from: string;
+  /** The ledger that holds the transaction, when the chain says (XRPL, Xahau: ledger index; Stellar: ledger sequence). */
+  ledgerIndex?: number;
 }
 
 /**

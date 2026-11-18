@@ -79,6 +79,7 @@ export class StellarLedger implements Ledger {
       delivered: `${request.amount} ${request.asset}`,
       explorer: this.explorerUrl(submitted.hash),
       from: kp.publicKey(),
+      ledgerIndex: submitted.ledger,
     };
   }
 

@@ -19,6 +19,8 @@ import { DEFAULT_QUOTE_EXPIRY_SECONDS, defaultShopAccount, shopAccountVariables 
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
+import { HARNESS_VERSION } from './version.js';
+import { RECORD_ASSETS, RECORD_DEFAULTS, defaultOutDir, parseAsset, parseSize, parseStart, recordChain } from './record/options.js';
 
 const program = new Command();
 program
@@ -26,7 +28,7 @@ program
   .description('LedgerDirect end-to-end harness — testnet wallets, payments, and the PS-01…PS-15 catalogue, on XRPL, Stellar and Xahau')
   .option('--json', 'machine-readable output')
   .option('--chain <chain>', `chain to operate on: ${CHAINS.join(' | ')}`, 'XRPL')
-  .version('0.1.0');
+  .version(HARNESS_VERSION);
 
 function out(data: unknown, human: () => string): void {
   const json = program.opts().json as boolean | undefined;
@@ -316,6 +318,56 @@ program
     const spent = Object.entries(report.spending?.spent ?? {}).map(([code, amount]) => `${amount} ${code}`).join(', ') || 'nothing';
     out(report, () => markdown(report) + `\nspent: ${spent}\nreport: ${opts.report}`);
     if (failed > 0) process.exitCode = 1;
+  });
+
+program
+  .command('record')
+  .description('film a real testnet purchase in a headless browser: the payment page (or the whole purchase), the payment, the confirmation — MP4, stills and recording.json')
+  .requiredOption('--target <plugin>', TARGETS.join(' | '))
+  .option('--try', "the plugin's try stack (dev/try, docker compose up) instead of the dev shop", false)
+  .option('--asset <code>', RECORD_ASSETS.join(' | '), RECORD_DEFAULTS.asset)
+  .option('--start <where>', 'payment: from the payment page on; shop: the whole purchase from the home page (needs the plugin\'s dev/try/browser/walk.mjs)', RECORD_DEFAULTS.start)
+  .option('--size <WxH>', 'video size, e.g. 1280x720 or 1080x1080', RECORD_DEFAULTS.size)
+  .option('--out <dir>', 'output folder (default out/recordings/<target>-<asset>-<start>-<size>-<timestamp>)')
+  .option('--base-url <url>', 'how the shop is reached from here (LD_E2E_<TARGET>_BASE_URL)')
+  .option('--compose-dir <dir>', "the shop's compose folder; with --start shop also where browser/walk.mjs is (default: the running shop container's)")
+  .option('--compose-files <files>', 'WooCommerce: comma-separated compose files (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
+  .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
+  .option('--container <name>', 'Shopware: docker container (LD_E2E_SHOPWARE_CONTAINER)')
+  .action(async (opts: { target: string; try: boolean; asset: string; start: string; size: string; out?: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
+    if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
+    const asset = parseAsset(opts.asset);
+    const payOn = recordChain(asset, chain());
+    // The try stacks take XRP, RLUSD and USDC on the XRP Ledger and XAH on Xahau.
+    if (opts.try && payOn === 'STELLAR') throw new Error('--try: the try stacks run on the XRP Ledger and Xahau testnets only');
+    const start = parseStart(opts.start);
+    const size = parseSize(opts.size);
+    const { driver, baseUrl } = createDriver(opts.target, {
+      try: opts.try,
+      baseUrl: opts.baseUrl,
+      composeDir: opts.composeDir,
+      composeFiles: opts.composeFiles?.split(',').map((f) => f.trim()).filter(Boolean),
+      accessKey: opts.accessKey,
+      container: opts.container,
+    });
+    const { recordPurchase } = await import('./record/record.js');
+    const result = await recordPurchase({
+      target: opts.target,
+      driver,
+      baseUrl,
+      try: opts.try,
+      chain: payOn,
+      asset,
+      start,
+      size,
+      outDir: opts.out ?? defaultOutDir(opts.target, asset, start, size, new Date()),
+      harnessVersion: program.version() ?? '0.0.0',
+      composeDir: opts.composeDir,
+      container: opts.container ?? (opts.try ? TRY_PRESETS[opts.target].container : process.env.LD_E2E_SHOPWARE_CONTAINER),
+      log: (line) => process.stderr.write(line + '\n'),
+    });
+    const payment = result.manifest.payment as { transactionHash?: string; explorer?: string } | null;
+    out(result, () => [`recording  ${result.outDir}`, `hash       ${payment?.transactionHash ?? '—'}`, `explorer   ${payment?.explorer ?? '—'}`].join('\n'));
   });
 
 const shop = program.command('shop').description("the dev shop's LedgerDirect configuration");

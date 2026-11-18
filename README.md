@@ -181,6 +181,7 @@ agent. Both call the same functions.
 | Shopping and paying | `shop_search_products`, `shop_place_order`, `shop_pay_order`, `shop_order_status`, `shop_wait_for`, `shop_order_evidence` |
 | Wallets | `wallet_status`, `wallet_fresh` (address only), `wallet_fund`, `pay` |
 | Catalogue | `list_cases`, `run_cases` (background job), `job_status`, `report_pr` |
+| Recordings | `shop_record_purchase` (background job, see [Recordings](#recordings)) |
 
 "Order two mugs on the PrestaShop dev shop and pay in RLUSD" is four tool calls: search, place,
 pay, wait — and the answer carries the transaction hash, the explorer link and what the shop
@@ -325,6 +326,65 @@ Afterwards the try shop goes back to its own receiving account. That is the acco
 its last start (`[ledger-direct-try] receiving account: r…`), not the dev shop's from the wallet
 file. The try stacks run on the XRP Ledger testnet, so `--try` is XRPL only.
 
+## Recordings
+
+`ld-e2e record` films a real purchase on the testnet in a headless Chrome: the LedgerDirect payment
+page waiting, a real payment from the treasury, the page noticing it, and the shop's order
+confirmation. It is for videos and posts; the raw film is cut elsewhere.
+
+```
+ld-e2e record --target shopware --try                                   # RLUSD, from the payment page, 1280x720
+ld-e2e record --target shopware --try --start shop --size 1080x1080     # the whole purchase, square
+ld-e2e record --target prestashop --try --asset XRP --out ~/videos/ps   # any target, any try asset
+```
+
+| Option | Default | |
+|---|---|---|
+| `--asset` | `RLUSD` | `XRP`, `RLUSD`, `USDC`, `XAH` (XAH pays on Xahau, without `--chain`) |
+| `--start` | `payment` | `payment`: filming starts on the payment page. `shop`: on the home page, the whole purchase |
+| `--size` | `1280x720` | the video size in pixels, even sides |
+| `--out` | `out/recordings/<target>-<asset>-<start>-<size>-<timestamp>/` | |
+
+`--try`, `--chain`, `--base-url`, `--compose-dir` and the Shopware options mean what they mean for
+`run`. The treasury, the spending limits and the environment are the same as for `run` and `pay`.
+
+**How it goes.** With `--start payment` filming begins once the page waits with its fonts and QR
+code loaded. About three seconds later the harness pays exactly what the page shows; nothing is
+clicked in the browser. Filming goes on until the page shows the payment, follows its redirect to
+the order confirmation and stops about three seconds later. With `--start shop` filming begins on
+the home page and the plugin's own browser walk goes to the payment page the way a visitor does;
+the rest is the same. Nothing on the page is changed for the film, and the page polls on its own
+schedule (every 8 seconds), so the waiting stays in the raw film.
+
+**Who places the order.** A storefront shows its order confirmation only to the browser session
+that ordered; Shopware sends anyone else to the cart. So where the plugin has a walk, the browser
+places the order with `--start payment` too, off camera, and filming starts on the payment page.
+Without a walk the driver places it, as in the catalogue, and pays it with the catalogue's
+`payOrder()`. `recording.json` says which (`orderedBy`).
+
+**The walk** is `dev/try/browser/walk.mjs` in the plugin repository, `walkToPaymentPage(page, {
+asset, base })`: the selectors for cart and checkout stay with the shop they belong to, and the
+plugin's `try.yml` checks them on every pull request. The harness finds it through `--compose-dir`,
+else through the compose folder docker recorded on the running shop container. Shopware has one;
+for the other plugins `--start shop` stops with a message saying where it looked.
+
+**Needs:** Chrome (`CHROME`, else the usual install paths, as for the plugins' `visitor.mjs`),
+`ffmpeg` on the `PATH`, and `puppeteer-core` 24.43.1, an optional dependency that `npm install`
+brings. Only `record` loads them: `run`, `pay`, the MCP server and the CI runs work without.
+
+**Output**, in the `--out` folder:
+
+| File | |
+|---|---|
+| `recording.mp4` | H.264, `yuv420p`, 25 fps at a steady rate, exactly the chosen size; no browser bar, no pointer, device scale factor 1 |
+| `first.png`, `settled.png`, `confirmation.png` | the first frame, the page showing the payment, the order confirmation, full size |
+| `recording.json` | shop, plugin version, asset, amount, receiving account, destination tag, transaction hash, ledger index, explorer link, who ordered, and the moments in seconds from the first frame: payment page reached, payment sent, transaction validated, page shows the payment, redirect, end |
+| `record.log` | what happened, redacted like every log of the harness |
+| `failure.png` | only when a recording stops early: what the browser showed |
+
+The films and stills show the shop and testnet data only: addresses, tags and hashes, no seed, no
+terminal. `recording.json` leaves out the page URL, because it carries the order's key.
+
 ## The shop's own account
 
 A run configures a fresh throwaway account as the shop's receiving account; nothing else is
@@ -352,7 +412,7 @@ repository — not in a test, not as a sample.
 
 ## Status
 
-0.1.0. Ten cases automated and green against PrestaShop, Shopware, WooCommerce and Magento on XRPL
+0.2.0 adds `ld-e2e record`. Ten cases automated and green against PrestaShop, Shopware, WooCommerce and Magento on XRPL
 with real testnet transactions; Stellar wired and verified on the ledger side; the MCP server drives
 the same functions, verified with a two-item RLUSD order placed, paid and settled through the tools.
 Next: nightly runs. A mainnet mode follows once the canary token

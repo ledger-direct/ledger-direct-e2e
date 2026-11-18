@@ -1,6 +1,6 @@
 {
   "name": "ledger-direct-e2e",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "End-to-end harness for the LedgerDirect plugins: XRPL and Stellar testnet wallets, payments, and the PS-01…PS-11 case catalogue, as a CLI, an MCP server and a library",
   "license": "MIT",
   "type": "module",
@@ -42,5 +42,8 @@
     "typescript": "^7.0.2",
     "vitest": "^5.1.0",
     "ws": "^8.22.1"
+  },
+  "optionalDependencies": {
+    "puppeteer-core": "24.43.1"
   }
 }

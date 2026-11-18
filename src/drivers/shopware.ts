@@ -276,6 +276,16 @@ export class ShopwareDriver implements Driver {
     }
   }
 
+  /** The plugin's version as Shopware's plugin list has it; null when the admin API does not say. */
+  async pluginVersion(): Promise<string | null> {
+    try {
+      const found = (await this.admin('POST', '/api/search/plugin', { filter: [{ type: 'equals', field: 'name', value: 'LedgerDirect' }] })) as { data?: Array<{ version?: string }> };
+      return found.data?.[0]?.version ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   /** Evidence for the report and the platform-state checks of the cases. */
   async orderState(order: PlacedOrder): Promise<Record<string, unknown>> {
     const found = (await this.admin('POST', '/api/search/order', {
