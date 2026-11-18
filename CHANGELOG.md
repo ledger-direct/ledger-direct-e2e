@@ -11,7 +11,7 @@
   `--start payment` the walk places the order off camera, so the confirmation at the end belongs to
   the session that ordered. Without a walk the driver places the order, as in the catalogue.
 - MCP tool `shop_record_purchase`, a background job like `run_cases`.
-- `puppeteer-core` 24.43.1 as an optional dependency, loaded by `record` alone; ffmpeg from the PATH.
+- `puppeteer-core` 25.16.0 (as in the plugins' try walks) as an optional dependency, loaded by `record` alone; ffmpeg from the PATH.
 - A payment result carries the ledger index (`ledgerIndex`) of its transaction.
 - Drivers may report the plugin version (`pluginVersion()`); Shopware does, from its plugin list.
 - One version constant for the CLI, the MCP server and reports (`src/version.ts`).

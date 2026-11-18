@@ -369,7 +369,7 @@ else through the compose folder docker recorded on the running shop container. S
 for the other plugins `--start shop` stops with a message saying where it looked.
 
 **Needs:** Chrome (`CHROME`, else the usual install paths, as for the plugins' `visitor.mjs`),
-`ffmpeg` on the `PATH`, and `puppeteer-core` 24.43.1, an optional dependency that `npm install`
+`ffmpeg` on the `PATH`, and `puppeteer-core` 25.16.0 (the plugins' try walks use the same), an optional dependency that `npm install`
 brings. Only `record` loads them: `run`, `pay`, the MCP server and the CI runs work without.
 
 **Output**, in the `--out` folder:

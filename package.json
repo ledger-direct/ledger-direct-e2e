@@ -44,6 +44,6 @@
     "ws": "^8.22.1"
   },
   "optionalDependencies": {
-    "puppeteer-core": "24.43.1"
+    "puppeteer-core": "25.16.0"
   }
 }
