@@ -20,7 +20,7 @@ import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
 import { HARNESS_VERSION } from './version.js';
-import { RECORD_ASSETS, RECORD_DEFAULTS, defaultOutDir, parseAsset, parseSize, parseStart, recordChain } from './record/options.js';
+import { RECORD_ASSETS, RECORD_COLOR_SCHEMES, RECORD_DEFAULTS, defaultOutDir, parseAsset, parseColorScheme, parseSize, parseStart, recordChain } from './record/options.js';
 
 const program = new Command();
 program
@@ -328,13 +328,14 @@ program
   .option('--asset <code>', RECORD_ASSETS.join(' | '), RECORD_DEFAULTS.asset)
   .option('--start <where>', 'payment: from the payment page on; shop: the whole purchase from the home page (needs the plugin\'s dev/try/browser/walk.mjs)', RECORD_DEFAULTS.start)
   .option('--size <WxH>', 'video size, e.g. 1280x720 or 1080x1080', RECORD_DEFAULTS.size)
+  .option('--color-scheme <scheme>', `prefers-color-scheme the pages see: ${RECORD_COLOR_SCHEMES.join(' | ')} (never the system's)`, RECORD_DEFAULTS.colorScheme)
   .option('--out <dir>', 'output folder (default out/recordings/<target>-<asset>-<start>-<size>-<timestamp>)')
   .option('--base-url <url>', 'how the shop is reached from here (LD_E2E_<TARGET>_BASE_URL)')
   .option('--compose-dir <dir>', "the shop's compose folder; with --start shop also where browser/walk.mjs is (default: the running shop container's)")
   .option('--compose-files <files>', 'WooCommerce: comma-separated compose files (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
   .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
   .option('--container <name>', 'Shopware: docker container (LD_E2E_SHOPWARE_CONTAINER)')
-  .action(async (opts: { target: string; try: boolean; asset: string; start: string; size: string; out?: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
+  .action(async (opts: { target: string; try: boolean; asset: string; start: string; size: string; colorScheme: string; out?: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
     if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
     const asset = parseAsset(opts.asset);
     const payOn = recordChain(asset, chain());
@@ -342,6 +343,7 @@ program
     if (opts.try && payOn === 'STELLAR') throw new Error('--try: the try stacks run on the XRP Ledger and Xahau testnets only');
     const start = parseStart(opts.start);
     const size = parseSize(opts.size);
+    const colorScheme = parseColorScheme(opts.colorScheme);
     const { driver, baseUrl } = createDriver(opts.target, {
       try: opts.try,
       baseUrl: opts.baseUrl,
@@ -359,8 +361,9 @@ program
       chain: payOn,
       asset,
       start,
+      colorScheme,
       size,
-      outDir: opts.out ?? defaultOutDir(opts.target, asset, start, size, new Date()),
+      outDir: opts.out ?? defaultOutDir(opts.target, asset, start, size, new Date(), undefined, colorScheme),
       harnessVersion: program.version() ?? '0.0.0',
       composeDir: opts.composeDir,
       container: opts.container ?? (opts.try ? TRY_PRESETS[opts.target].container : process.env.LD_E2E_SHOPWARE_CONTAINER),

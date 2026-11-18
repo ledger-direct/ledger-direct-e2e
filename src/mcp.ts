@@ -9,7 +9,7 @@ import { spendGuard } from './chains/spend.js';
 import { redact, requireSeed } from './config.js';
 import { createDriver, TARGETS } from './drivers/factory.js';
 import { TRY_PRESETS } from './drivers/try.js';
-import { defaultOutDir, parseSize, RECORD_ASSETS, RECORD_DEFAULTS, RECORD_STARTS, recordChain } from './record/options.js';
+import { defaultOutDir, parseSize, RECORD_ASSETS, RECORD_COLOR_SCHEMES, RECORD_DEFAULTS, RECORD_STARTS, recordChain } from './record/options.js';
 import { HARNESS_VERSION } from './version.js';
 import { hasPlatformState } from './drivers/platform.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
@@ -245,19 +245,20 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
       asset: z.enum(RECORD_ASSETS).default(RECORD_DEFAULTS.asset),
       start: z.enum(RECORD_STARTS).default(RECORD_DEFAULTS.start).describe('payment: from the payment page on; shop: the whole purchase from the home page'),
       size: z.string().default(RECORD_DEFAULTS.size).describe('WIDTHxHEIGHT, e.g. 1280x720 or 1080x1080'),
+      colorScheme: z.enum(RECORD_COLOR_SCHEMES).default(RECORD_DEFAULTS.colorScheme).describe('prefers-color-scheme the pages see; never the system\'s'),
       chain: chainSchema,
       out: z.string().optional().describe('output folder; default out/recordings/<target>-<asset>-<start>-<size>-<timestamp>'),
       composeDir: z.string().optional().describe("the shop's compose folder (the plugin's dev/try for a try stack); default: the running container's"),
     },
-  }, async ({ target, try: useTry, asset, start, size, chain, out, composeDir }) => {
+  }, async ({ target, try: useTry, asset, start, size, colorScheme, chain, out, composeDir }) => {
     const videoSize = parseSize(size);
     const { driver, baseUrl } = createDriver(target, { try: useTry, composeDir });
-    const outDir = out ?? defaultOutDir(target, asset, start, videoSize, new Date());
+    const outDir = out ?? defaultOutDir(target, asset, start, videoSize, new Date(), undefined, colorScheme);
     const jobId = `record-${Date.now().toString(36)}`;
     const job: { status: 'running' | 'done' | 'failed'; startedAt: string; log: string[]; result?: unknown; error?: string } = { status: 'running', startedAt: new Date().toISOString(), log: [] };
     jobs.set(jobId, job);
     void import('./record/record.js').then(({ recordPurchase }) => recordPurchase({
-      target, driver, baseUrl, try: useTry, chain: recordChain(asset, chain), asset, start, size: videoSize, outDir,
+      target, driver, baseUrl, try: useTry, chain: recordChain(asset, chain), asset, start, colorScheme, size: videoSize, outDir,
       harnessVersion: HARNESS_VERSION,
       composeDir,
       container: useTry ? TRY_PRESETS[target].container : process.env.LD_E2E_SHOPWARE_CONTAINER,
