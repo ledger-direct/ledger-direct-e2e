@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { chromePath } from '../src/record/browser.js';
 import { buildManifest, relative, type RecordFacts } from '../src/record/manifest.js';
-import { defaultOutDir, orderedBy, parseAsset, parseSize, parseStart, recordChain, stamp } from '../src/record/options.js';
+import { defaultOutDir, orderedBy, parseAsset, parseColorScheme, parseSize, parseStart, recordChain, stamp } from '../src/record/options.js';
 import { findWalkModule, walkPath } from '../src/record/walk.js';
 import { HARNESS_VERSION } from '../src/version.js';
 
@@ -30,6 +30,12 @@ describe('record arguments', () => {
     expect(recordChain('RLUSD', 'XRPL')).toBe('XRPL');
   });
 
+  it('names the colour scheme the pages see, light or dark', () => {
+    expect(parseColorScheme('Light')).toBe('light');
+    expect(parseColorScheme('dark')).toBe('dark');
+    expect(() => parseColorScheme('system')).toThrow(/light, dark/);
+  });
+
   it('starts on the payment page or in the shop', () => {
     expect(parseStart('Payment')).toBe('payment');
     expect(parseStart('shop')).toBe('shop');
@@ -44,9 +50,9 @@ describe('record output folder', () => {
     expect(stamp(at)).toBe('20261118-090503');
   });
 
-  it('names target, asset, start, size and time', () => {
-    expect(defaultOutDir('shopware', 'RLUSD', 'payment', { width: 1280, height: 720 }, at)).toBe('out/recordings/shopware-rlusd-payment-1280x720-20261118-090503');
-    expect(defaultOutDir('magento', 'XRP', 'shop', { width: 1080, height: 1080 }, at, '/tmp/rec')).toBe('/tmp/rec/magento-xrp-shop-1080x1080-20261118-090503');
+  it('names target, asset, start, size, colour scheme and time', () => {
+    expect(defaultOutDir('shopware', 'RLUSD', 'payment', { width: 1280, height: 720 }, at)).toBe('out/recordings/shopware-rlusd-payment-1280x720-light-20261118-090503');
+    expect(defaultOutDir('magento', 'XRP', 'shop', { width: 1080, height: 1080 }, at, '/tmp/rec', 'dark')).toBe('/tmp/rec/magento-xrp-shop-1080x1080-dark-20261118-090503');
   });
 });
 
@@ -105,6 +111,7 @@ describe('recording.json', () => {
     asset: 'RLUSD',
     start: 'payment',
     orderedBy: 'browser',
+    colorScheme: 'light',
     size: { width: 1280, height: 720 },
     startedAt: new Date(t0 - 20_000),
     payment: {
@@ -153,6 +160,7 @@ describe('recording.json', () => {
     expect(manifest.shop).toEqual({ target: 'shopware', baseUrl: 'http://localhost:8091', try: true, pluginVersion: '1.11.0' });
     expect(manifest.video).toEqual({ file: 'recording.mp4', width: 1280, height: 720, fps: 25, codec: 'h264', pixelFormat: 'yuv420p' });
     expect(manifest.orderedBy).toBe('browser');
+    expect(manifest.colorScheme).toBe('light');
   });
 
   it('holds no secret: no seed, no page URL with the order key', () => {

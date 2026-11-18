@@ -20,7 +20,21 @@ export interface VideoSize {
 /** The frame rate of every recording: even, and enough for scrolling and the page's countdowns. */
 export const RECORD_FPS = 25;
 
-export const RECORD_DEFAULTS = { asset: 'RLUSD' as RecordAsset, start: 'payment' as RecordStart, size: '1280x720' };
+/**
+ * What the page is told about the viewer's colour preference (`prefers-color-scheme`). Headless
+ * Chrome otherwise takes the operating system's, so the same command filmed a dark payment page on
+ * a Mac in dark mode and a light one elsewhere. A recording names it instead.
+ */
+export const RECORD_COLOR_SCHEMES = ['light', 'dark'] as const;
+export type RecordColorScheme = (typeof RECORD_COLOR_SCHEMES)[number];
+
+export const RECORD_DEFAULTS = { asset: 'RLUSD' as RecordAsset, start: 'payment' as RecordStart, size: '1280x720', colorScheme: 'light' as RecordColorScheme };
+
+export function parseColorScheme(value: string): RecordColorScheme {
+  const scheme = value.trim().toLowerCase();
+  if (!(RECORD_COLOR_SCHEMES as readonly string[]).includes(scheme)) throw new Error(`--color-scheme: ${value} is not one of ${RECORD_COLOR_SCHEMES.join(', ')}`);
+  return scheme as RecordColorScheme;
+}
 
 /** `1280x720` → { width: 1280, height: 720 }. Even sides only: H.264 in yuv420p needs them. */
 export function parseSize(value: string): VideoSize {
@@ -58,8 +72,8 @@ export function stamp(date: Date): string {
 }
 
 /** `out/recordings/<target>-<asset>-<start>-<size>-<timestamp>/`, the default of --out. */
-export function defaultOutDir(target: string, asset: RecordAsset, start: RecordStart, size: VideoSize, date: Date, root = 'out/recordings'): string {
-  return join(root, `${target}-${asset.toLowerCase()}-${start}-${size.width}x${size.height}-${stamp(date)}`);
+export function defaultOutDir(target: string, asset: RecordAsset, start: RecordStart, size: VideoSize, date: Date, root = 'out/recordings', colorScheme: RecordColorScheme = 'light'): string {
+  return join(root, `${target}-${asset.toLowerCase()}-${start}-${size.width}x${size.height}-${colorScheme}-${stamp(date)}`);
 }
 
 /** The files one recording leaves in its folder. */

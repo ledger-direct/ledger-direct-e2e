@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `ld-e2e record --color-scheme light|dark` (MCP: `colorScheme`), `light` by default: what the pages see as
+  `prefers-color-scheme`. Headless Chrome took the system's before, so a Mac in dark mode filmed a dark payment
+  page. The default folder name includes the scheme; `recording.json` records it always.
+
 ## 0.2.0
 
 - `ld-e2e record` films a real testnet purchase in a headless Chrome: the payment page from

@@ -27,6 +27,7 @@ export interface BrowserPage {
   waitForNavigation(options?: Record<string, unknown>): Promise<unknown>;
   screenshot(options: { path: string; type?: 'png' }): Promise<unknown>;
   createCDPSession(): Promise<CdpSession>;
+  emulateMediaFeatures(features: Array<{ name: string; value: string }>): Promise<void>;
   mainFrame(): unknown;
   on(event: 'framenavigated', handler: (frame: unknown) => void): void;
 }

@@ -343,7 +343,8 @@ ld-e2e record --target prestashop --try --asset XRP --out ~/videos/ps   # any ta
 | `--asset` | `RLUSD` | `XRP`, `RLUSD`, `USDC`, `XAH` (XAH pays on Xahau, without `--chain`) |
 | `--start` | `payment` | `payment`: filming starts on the payment page. `shop`: on the home page, the whole purchase |
 | `--size` | `1280x720` | the video size in pixels, even sides |
-| `--out` | `out/recordings/<target>-<asset>-<start>-<size>-<timestamp>/` | |
+| `--color-scheme` | `light` | `light` or `dark`: the pages see this `prefers-color-scheme`, whatever the system prefers (headless Chrome would otherwise follow the Mac's dark mode) |
+| `--out` | `out/recordings/<target>-<asset>-<start>-<size>-<scheme>-<timestamp>/` | |
 
 `--try`, `--chain`, `--base-url`, `--compose-dir` and the Shopware options mean what they mean for
 `run`. The treasury, the spending limits and the environment are the same as for `run` and `pay`.
@@ -383,7 +384,7 @@ brings. Only `record` loads them: `run`, `pay`, the MCP server and the CI runs w
 | `failure.png` | only when a recording stops early: what the browser showed |
 
 The films and stills show the shop and testnet data only: addresses, tags and hashes, no seed, no
-terminal. `recording.json` leaves out the page URL, because it carries the order's key.
+terminal. `recording.json` leaves out the page URL, because it carries the order's key. It names the colour scheme (`colorScheme`).
 
 ## The shop's own account
 

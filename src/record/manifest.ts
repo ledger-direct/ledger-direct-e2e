@@ -1,4 +1,4 @@
-import { RECORD_FILES, RECORD_FPS, type OrderedBy, type RecordAsset, type RecordStart, type VideoSize } from './options.js';
+import { RECORD_FILES, RECORD_FPS, type OrderedBy, type RecordColorScheme, type RecordAsset, type RecordStart, type VideoSize } from './options.js';
 
 /**
  * Seconds from the first frame of the video, with a tenth of a second — what the edit needs to
@@ -28,6 +28,8 @@ export interface RecordFacts {
   harnessVersion: string;
   asset: RecordAsset;
   start: RecordStart;
+  /** `prefers-color-scheme` as the page saw it. */
+  colorScheme: RecordColorScheme;
   /** Who placed the order: the browser (with a walk), or the driver. */
   orderedBy: OrderedBy;
   size: VideoSize;
@@ -80,6 +82,7 @@ export function buildManifest(facts: RecordFacts): Record<string, unknown> {
     asset: facts.asset,
     start: facts.start,
     orderedBy: facts.orderedBy,
+    colorScheme: facts.colorScheme,
     order: facts.order ?? null,
     payment: facts.payment
       ? {

@@ -9,7 +9,7 @@ import { readPaymentPage } from '../drivers/page.js';
 import { ShopSession } from '../session.js';
 import { chromePath, launchBrowser, requireFfmpeg, ScreenRecorder, type Browser, type BrowserPage } from './browser.js';
 import { buildManifest, type RecordFacts } from './manifest.js';
-import { orderedBy, RECORD_FILES, type RecordAsset, type RecordStart, type VideoSize } from './options.js';
+import { orderedBy, RECORD_FILES, type RecordAsset, type RecordColorScheme, type RecordStart, type VideoSize } from './options.js';
 import { findWalkModule, type WalkToPaymentPage } from './walk.js';
 
 /**
@@ -35,6 +35,8 @@ export interface RecordRequest {
   chain: ChainId;
   asset: RecordAsset;
   start: RecordStart;
+  /** What the page is told about the viewer's colour preference; the system's is never used. */
+  colorScheme: RecordColorScheme;
   size: VideoSize;
   outDir: string;
   harnessVersion: string;
@@ -88,13 +90,14 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
     harnessVersion: request.harnessVersion,
     asset: request.asset,
     start: request.start,
+    colorScheme: request.colorScheme,
     orderedBy: orderedBy(request.start, walkModule),
     size,
     startedAt: new Date(),
     moments: { videoStart: null },
     error: null,
   };
-  log(`record ${request.target}${request.try ? ' (try)' : ''}, ${request.asset} on ${request.chain}, start ${request.start}, ${size.width}x${size.height} → ${outDir}`);
+  log(`record ${request.target}${request.try ? ' (try)' : ''}, ${request.asset} on ${request.chain}, start ${request.start}, ${size.width}x${size.height}, ${facts.colorScheme} → ${outDir}`);
   if (facts.pluginVersion) log(`plugin ${facts.pluginVersion}`);
 
   let browser: Browser | undefined;
@@ -116,6 +119,7 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
     });
     const still = (name: string) => page.screenshot({ path: join(outDir, name), type: 'png' });
     failureStill = () => still(RECORD_FILES.failure);
+    await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: facts.colorScheme }]);
     const base = request.baseUrl.replace(/\/$/, '');
     const film = async () => {
       filming = new ScreenRecorder(page, size, join(outDir, RECORD_FILES.video));
