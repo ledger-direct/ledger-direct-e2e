@@ -343,7 +343,7 @@ ld-e2e record --target prestashop --try --asset XRP --out ~/videos/ps   # any ta
 | `--asset` | `RLUSD` | `XRP`, `RLUSD`, `USDC`, `XAH` (XAH pays on Xahau, without `--chain`) |
 | `--start` | `payment` | `payment`: filming starts on the payment page. `shop`: on the home page, the whole purchase |
 | `--size` | `1280x720` | the video size in pixels, even sides |
-| `--color-scheme` | `light` | `light` or `dark`: what the pages see as `prefers-color-scheme`. Never the system's, so the payment page looks the same on every machine (headless Chrome would otherwise follow the Mac's dark mode) |
+| `--color-scheme` | `light` | `light` or `dark`: the pages see this `prefers-color-scheme`, whatever the system prefers (headless Chrome would otherwise follow the Mac's dark mode) |
 | `--out` | `out/recordings/<target>-<asset>-<start>-<size>-<scheme>-<timestamp>/` | |
 
 `--try`, `--chain`, `--base-url`, `--compose-dir` and the Shopware options mean what they mean for

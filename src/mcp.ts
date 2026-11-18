@@ -247,7 +247,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
       size: z.string().default(RECORD_DEFAULTS.size).describe('WIDTHxHEIGHT, e.g. 1280x720 or 1080x1080'),
       colorScheme: z.enum(RECORD_COLOR_SCHEMES).default(RECORD_DEFAULTS.colorScheme).describe('prefers-color-scheme the pages see; never the system\'s'),
       chain: chainSchema,
-      out: z.string().optional().describe('output folder; default out/recordings/<target>-<asset>-<start>-<size>-<timestamp>'),
+      out: z.string().optional().describe('output folder; default out/recordings/<target>-<asset>-<start>-<size>-<scheme>-<timestamp>'),
       composeDir: z.string().optional().describe("the shop's compose folder (the plugin's dev/try for a try stack); default: the running container's"),
     },
   }, async ({ target, try: useTry, asset, start, size, colorScheme, chain, out, composeDir }) => {

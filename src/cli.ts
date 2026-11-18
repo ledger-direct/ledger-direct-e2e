@@ -329,7 +329,7 @@ program
   .option('--start <where>', 'payment: from the payment page on; shop: the whole purchase from the home page (needs the plugin\'s dev/try/browser/walk.mjs)', RECORD_DEFAULTS.start)
   .option('--size <WxH>', 'video size, e.g. 1280x720 or 1080x1080', RECORD_DEFAULTS.size)
   .option('--color-scheme <scheme>', `prefers-color-scheme the pages see: ${RECORD_COLOR_SCHEMES.join(' | ')} (never the system's)`, RECORD_DEFAULTS.colorScheme)
-  .option('--out <dir>', 'output folder (default out/recordings/<target>-<asset>-<start>-<size>-<timestamp>)')
+  .option('--out <dir>', 'output folder (default out/recordings/<target>-<asset>-<start>-<size>-<scheme>-<timestamp>)')
   .option('--base-url <url>', 'how the shop is reached from here (LD_E2E_<TARGET>_BASE_URL)')
   .option('--compose-dir <dir>', "the shop's compose folder; with --start shop also where browser/walk.mjs is (default: the running shop container's)")
   .option('--compose-files <files>', 'WooCommerce: comma-separated compose files (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')

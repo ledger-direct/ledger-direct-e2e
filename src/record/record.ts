@@ -97,7 +97,7 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
     moments: { videoStart: null },
     error: null,
   };
-  log(`record ${request.target}${request.try ? ' (try)' : ''}, ${request.asset} on ${request.chain}, start ${request.start}, ${size.width}x${size.height}, ${request.colorScheme} → ${outDir}`);
+  log(`record ${request.target}${request.try ? ' (try)' : ''}, ${request.asset} on ${request.chain}, start ${request.start}, ${size.width}x${size.height}, ${facts.colorScheme} → ${outDir}`);
   if (facts.pluginVersion) log(`plugin ${facts.pluginVersion}`);
 
   let browser: Browser | undefined;
@@ -111,7 +111,6 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
   try {
     browser = await launchBrowser(size);
     const page = await browser.newPage();
-    await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: request.colorScheme }]);
     let pageUrl = '';
     page.on('framenavigated', (frame) => {
       if (frame === page.mainFrame() && pageUrl && page.url() !== pageUrl && facts.moments.redirect === undefined && facts.moments.pageShowsSettled) {
@@ -120,6 +119,7 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
     });
     const still = (name: string) => page.screenshot({ path: join(outDir, name), type: 'png' });
     failureStill = () => still(RECORD_FILES.failure);
+    await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: facts.colorScheme }]);
     const base = request.baseUrl.replace(/\/$/, '');
     const film = async () => {
       filming = new ScreenRecorder(page, size, join(outDir, RECORD_FILES.video));
