@@ -1,6 +1,7 @@
 import { generateKeyPairSync, verify } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isAccountOf, isChain, treasurySeedVariable } from '../src/chains/index.js';
+import { GuardedLedger, SpendGuard } from '../src/chains/spend.js';
 import { fromScale, OpenPaymentsClient, parseGrantAnswer, toScale } from '../src/chains/interledger/client.js';
 import { consentLinks, incomingPaymentId, InterledgerLedger, interledgerSettings, type InterledgerSettings, resetInterledgerGrants } from '../src/chains/interledger/ledger.js';
 import { contentDigest, privateKeyOf, signatureBase, signatureParams, signedHeaders } from '../src/chains/interledger/signature.js';
@@ -191,7 +192,7 @@ describe('an Interledger payment page', () => {
  * Two wallets as one fetch: the payer's authorization and resource server, and the
  * merchant's incoming payment. Every request is kept, so a test can say what was asked.
  */
-function wallets(options: { pollsUntilApproved?: number; deny?: boolean; neverDecides?: boolean; failPayment?: boolean; incomingAsset?: string } = {}) {
+function wallets(options: { pollsUntilApproved?: number; deny?: boolean; neverDecides?: boolean; failPayment?: boolean; incomingAsset?: string; expiresIn?: number; noManage?: boolean; refuseRotation?: boolean } = {}) {
   const requests: Array<{ method: string; url: string; headers: Record<string, string>; body?: unknown }> = [];
   let polls = 0;
   let received = 0n;
@@ -219,7 +220,11 @@ function wallets(options: { pollsUntilApproved?: number; deny?: boolean; neverDe
       polls += 1;
       if (options.deny) return json({ error: { code: 'user_denied', description: 'the owner refused\u0007 the request' } }, 403);
       if (options.neverDecides || polls < (options.pollsUntilApproved ?? 2)) return json(pending);
-      return json({ access_token: { value: TOKEN, manage: 'https://payer.example/gnap/token/t1', expires_in: 3600 } });
+      return json({ access_token: { value: TOKEN, ...(options.noManage ? {} : { manage: 'https://payer.example/gnap/token/t1' }), expires_in: options.expiresIn ?? 3600 } });
+    }
+    if (method === 'POST' && url === 'https://payer.example/gnap/token/t1') {
+      if (options.refuseRotation) return json({ error: { code: 'invalid_rotation', description: 'the grant was revoked' } }, 401);
+      return json({ access_token: { value: `${TOKEN}-2`, manage: 'https://payer.example/gnap/token/t1', expires_in: 3600 } });
     }
     if (method === 'DELETE' && url === 'https://payer.example/gnap/continue/g1') return json(null, 204);
     if (method === 'POST' && url === 'https://payer.example/quotes') {
@@ -285,6 +290,59 @@ describe('the agent pays an order', () => {
 
     expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
     expect(w.of('POST', 'https://payer.example/outgoing-payments')).toHaveLength(2);
+  });
+
+  it('gets a new token for the same grant when the old one is about to lapse', async () => {
+    const w = wallets({ expiresIn: 10 });
+    await new InterledgerLedger(settings, noWait).pay(order);
+
+    expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+    expect(w.of('POST', 'https://payer.example/quotes')[0].headers.authorization).toBe(`GNAP ${TOKEN}-2`);
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+  });
+
+  it('asks the owner again when the wallet refuses to renew the token', async () => {
+    const w = wallets({ expiresIn: 10, refuseRotation: true });
+    await expect(new InterledgerLedger(settings, noWait).pay(order)).resolves.toMatchObject({ validated: true });
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+  });
+
+  it('asks the owner again once a token that cannot be renewed has run out', async () => {
+    const w = wallets({ expiresIn: 0, noManage: true });
+    const ledger = new InterledgerLedger(settings, noWait);
+    await ledger.authorize(SEED, () => {});
+
+    // The grant is over: asking how things stand asks the owner anew, and says that it waits.
+    expect((await ledger.authorization(SEED)).approved).toBe(false);
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+  });
+
+  it('keeps a request that waits across ledgers that were closed meanwhile, as an MCP tool call leaves them', async () => {
+    const w = wallets({ pollsUntilApproved: 3 });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const first = new InterledgerLedger(settings, () => held);
+    await expect(approvedOrRefuse(first, SEED)).rejects.toThrow(/has not approved the agent yet/);
+    await first.close();
+
+    release();
+    const second = new GuardedLedger(new InterledgerLedger(settings, noWait), new SpendGuard(undefined));
+    await second.authorize!(SEED, () => {});
+    await approvedOrRefuse(second, SEED);
+    await second.pay(order);
+    await second.close();
+
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+    expect(w.of('POST', 'https://payer.example/outgoing-payments')).toHaveLength(1);
+  });
+
+  it('is the same ledger behind the spend guard: no accounts to make, an account per quote, an owner to ask', () => {
+    const guarded = new GuardedLedger(new InterledgerLedger(settings, noWait), new SpendGuard(undefined));
+    expect(guarded.makesAccounts).toBe(false);
+    expect(guarded.accountPerQuote).toBe(true);
+    expect(typeof guarded.authorize).toBe('function');
+    expect(typeof guarded.authorization).toBe('function');
+    expect(guarded.chain).toBe('INTERLEDGER');
   });
 
   it('refuses another asset before anybody is asked for anything', async () => {

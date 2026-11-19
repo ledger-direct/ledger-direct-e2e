@@ -125,6 +125,14 @@ interface GrantRequest {
   approved: boolean;
   approveAt: string[];
   asks: string;
+  /** The grant, once given: its token is what tells a grant that is over from one that lasts. */
+  grant?: Granted;
+}
+
+/** A grant whose token ran out and names no place to get another: the owner has to be asked again. */
+function isOver(request: GrantRequest, now = Date.now()): boolean {
+  const token = request.grant?.token;
+  return token !== undefined && token.expiresAt !== undefined && token.expiresAt <= now && !token.manage;
 }
 
 /**
@@ -206,7 +214,7 @@ export class InterledgerLedger implements Ledger {
     const receive: Amount = { value: toScale(request.amount, before.assetScale), assetCode: before.assetCode, assetScale: before.assetScale };
     if (BigInt(receive.value) === 0n) throw new Error(`${request.amount} ${request.asset} is nothing at the asset's scale of ${before.assetScale}`);
 
-    const granted = await this.usable(await this.granted(request.seed, (line) => console.error(line)), request.seed);
+    const granted = await this.usable(request.seed, (line) => console.error(line));
     const client = this.clientFor(request.seed);
     const quote = await client.createQuote(granted.wallet, granted.token, request.to, receive);
     const payment = await client.createOutgoingPayment(granted.wallet, granted.token, quote.id);
@@ -255,9 +263,9 @@ export class InterledgerLedger implements Ledger {
   }
 
   private request(seed: string, announce: (line: string) => void): GrantRequest {
-    const id = `${this.settings.payingWalletAddress}\n${this.settings.clientWalletAddress}`;
+    const id = this.grantId();
     const known = grants.get(id);
-    if (known) return known;
+    if (known && !isOver(known)) return known;
     let out!: () => void;
     const request: GrantRequest = { granted: undefined as unknown as Promise<Granted>, asked: new Promise<void>((resolve) => (out = resolve)), approved: false, approveAt: [], asks: '' };
     request.granted = this.askOwner(seed, announce, (asks, approveAt) => {
@@ -266,6 +274,7 @@ export class InterledgerLedger implements Ledger {
       out();
     }).then((granted) => {
       request.approved = true;
+      request.grant = granted;
       return granted;
     });
     grants.set(id, request);
@@ -314,10 +323,27 @@ export class InterledgerLedger implements Ledger {
     return { token: answer.token, wallet };
   }
 
-  /** The grant with a token that still has time: rotated when it is about to lapse. */
-  private async usable(granted: Granted, seed: string): Promise<Granted> {
-    if (granted.token.expiresAt === undefined || granted.token.expiresAt - Date.now() > ROTATE_BEFORE_MS || !granted.token.manage) return granted;
-    granted.token = await this.clientFor(seed).rotate(granted.token);
-    return granted;
+  private grantId(): string {
+    return `${this.settings.payingWalletAddress}\n${this.settings.clientWalletAddress}`;
+  }
+
+  /**
+   * The grant with a token that still has time: rotated when it is about to lapse. A token
+   * that cannot be rotated is used while it lasts; a grant whose token is gone for good, or
+   * whose rotation the wallet refuses, is forgotten and the owner is asked again, so a
+   * long-lived process (the MCP server) does not keep paying with a dead token.
+   */
+  private async usable(seed: string, announce: (line: string) => void): Promise<Granted> {
+    const request = this.request(seed, announce);
+    const granted = await request.granted;
+    const { expiresAt, manage } = granted.token;
+    if (expiresAt === undefined || expiresAt - Date.now() > ROTATE_BEFORE_MS || !manage) return granted;
+    try {
+      granted.token = await this.clientFor(seed).rotate(granted.token);
+      return granted;
+    } catch {
+      if (grants.get(this.grantId()) === request) grants.delete(this.grantId());
+      return this.granted(seed, announce);
+    }
   }
 }
