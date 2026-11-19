@@ -1,7 +1,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import type { ChainId } from '../chains/chain.js';
+import { type ChainId, describeUnvalidated } from '../chains/chain.js';
 import { ledgerFor, treasurySeedVariable } from '../chains/index.js';
 import { redact, requireSeed } from '../config.js';
 import type { Driver } from '../drivers/driver.js';
@@ -221,7 +221,7 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
       facts.moments.transactionValidated = Date.now();
       facts.payment = { amount: view.amountDisplayed, asset: paid.asset, destinationAccount: paid.to, destinationTag: paid.identifier, hash: paid.hash, result: paid.result, ledgerIndex: paid.ledgerIndex, explorer: paid.explorer };
       log(`paid ${paid.paid}: ${paid.result} ${paid.hash}${paid.ledgerIndex ? ` in ledger ${paid.ledgerIndex}` : ''}`);
-      if (!paid.validated) throw new Error(`payment failed: ${paid.result}`);
+      if (!paid.validated) throw new Error(describeUnvalidated(paid));
     } else {
       if (request.start === 'payment') {
         // Off camera: the browser orders, so the confirmation at the end is the one this browser may see.
@@ -252,7 +252,7 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
         facts.moments.transactionValidated = Date.now();
         facts.payment = { amount: view.amountDisplayed, asset, destinationAccount: view.destinationAccount, destinationTag: view.paymentIdentifier, hash: paid.hash, result: paid.result, ledgerIndex: paid.ledgerIndex, explorer: paid.explorer };
         log(`paid ${view.amountDisplayed} ${asset}: ${paid.result} ${paid.hash}${paid.ledgerIndex ? ` in ledger ${paid.ledgerIndex}` : ''}`);
-        if (!paid.validated) throw new Error(`payment failed: ${paid.result}`);
+        if (!paid.validated) throw new Error(describeUnvalidated(paid));
       } finally {
         await ledger.close();
       }

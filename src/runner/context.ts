@@ -1,5 +1,5 @@
 import type { Driver, PlacedOrder, PaymentPageView, ShopConfig, StatusPayload } from '../drivers/driver.js';
-import type { Ledger, PaymentResult } from '../chains/chain.js';
+import { describeUnvalidated, type Ledger, type PaymentResult } from '../chains/chain.js';
 
 export interface Evidence {
   kind: 'order' | 'tx' | 'state' | 'note';
@@ -78,7 +78,7 @@ export class CaseContext {
     const result = await this.ledger.pay({ seed: this.payerSeed, to: page.destinationAccount, identifier: page.paymentIdentifier, amount, asset, partial: extra.partial });
     this.evidence.push({ kind: 'tx', text: `sent ${amount} ${asset} → ${result.result}`, hash: result.hash, explorer: result.explorer });
     this.log(`paid ${amount} ${asset}: ${result.result} ${result.hash}`);
-    if (!result.validated) throw new Error(`payment failed: ${result.result}`);
+    if (!result.validated) throw new Error(describeUnvalidated(result));
     return result;
   }
 
