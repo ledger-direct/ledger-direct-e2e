@@ -61,6 +61,24 @@ const CONSENT_BUTTONS = ['.js-cookie-permission-button'];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Runs in every document before its own scripts. A string, not a function: a function compiled
+ * by a bundler (tsx) can refer to helpers the page does not have. The style is set on the elements
+ * themselves, because a storefront's content security policy may refuse a style sheet added by
+ * script, and watched, because the toolbar arrives after the page by a request of its own.
+ */
+const HIDE_DEBUG_TOOLBAR = `(() => {
+  const hide = () => {
+    for (const bar of document.querySelectorAll('.sf-toolbar, .sf-minitoolbar, .sf-toolbarreset')) bar.style.setProperty('display', 'none', 'important');
+  };
+  const watch = () => {
+    hide();
+    new MutationObserver(hide).observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] });
+  };
+  if (document.documentElement) watch();
+  else document.addEventListener('DOMContentLoaded', watch);
+})()`;
+
 export async function recordPurchase(request: RecordRequest): Promise<RecordResult> {
   const { outDir, size } = request;
   // Everything that can be checked without spending: the walk, the browser, ffmpeg, the treasury seed.
@@ -100,6 +118,20 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
   log(`record ${request.target}${request.try ? ' (try)' : ''}, ${request.asset} on ${request.chain}, start ${request.start}, ${size.width}x${size.height}, ${facts.colorScheme} → ${outDir}`);
   if (facts.pluginVersion) log(`plugin ${facts.pluginVersion}`);
 
+  // A payer that needs somebody's word (Interledger: the paying wallet's owner) gets it before
+  // anything is filmed or ordered: a quote runs out, and a film of a waiting page is no film.
+  // Where they decide is for the person at the terminal, not for the log beside the video.
+  const asking = ledgerFor(request.chain);
+  try {
+    if (asking.authorize) {
+      log('asking the paying wallet\'s owner for the grant');
+      await asking.authorize(seed, (line) => request.log?.(redact(line)));
+      log('the owner approved');
+    }
+  } finally {
+    await asking.close();
+  }
+
   let browser: Browser | undefined;
   let filming: ScreenRecorder | undefined;
   let failureStill: (() => Promise<unknown>) | undefined;
@@ -120,6 +152,9 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
     const still = (name: string) => page.screenshot({ path: join(outDir, name), type: 'png' });
     failureStill = () => still(RECORD_FILES.failure);
     await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: facts.colorScheme }]);
+    // A dev shop draws its framework's debug toolbar over every page (Symfony's, in Shopware with
+    // APP_ENV=dev). It is the developer's, not the customer's, and has no place in the film.
+    await page.evaluateOnNewDocument(HIDE_DEBUG_TOOLBAR);
     const base = request.baseUrl.replace(/\/$/, '');
     const film = async () => {
       filming = new ScreenRecorder(page, size, join(outDir, RECORD_FILES.video));

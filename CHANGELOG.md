@@ -18,6 +18,10 @@
   waiting for a person.
 - Shopware driver: Interledger payment methods, and what arrived on an incoming payment read from the
   order's stored intent.
+- `ld-e2e record` asks for the grant before anything is ordered or filmed, and hides a dev shop's debug
+  toolbar (Symfony's) in every page it films.
+- PS-12 on a chain with an account per quote compares the account alone: the page shows no identifier
+  beside it, and the status carries its amounts as objects there.
 - `ld-e2e record --color-scheme light|dark` (MCP: `colorScheme`), `light` by default: what the pages see as
   `prefers-color-scheme`. Headless Chrome took the system's before, so a Mac in dark mode filmed a dark payment
   page. The default folder name includes the scheme; `recording.json` records it always.

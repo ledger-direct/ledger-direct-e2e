@@ -28,6 +28,8 @@ export interface BrowserPage {
   screenshot(options: { path: string; type?: 'png' }): Promise<unknown>;
   createCDPSession(): Promise<CdpSession>;
   emulateMediaFeatures(features: Array<{ name: string; value: string }>): Promise<void>;
+  /** Runs the script in every document of the page before its own scripts. */
+  evaluateOnNewDocument(script: string): Promise<unknown>;
   mainFrame(): unknown;
   on(event: 'framenavigated', handler: (frame: unknown) => void): void;
 }
