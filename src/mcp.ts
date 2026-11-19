@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { CASES, findCase } from './cases/catalogue.js';
 import { CHAINS, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
 import { INTERLEDGER_ASSETS } from './chains/interledger/assets.js';
-import type { ChainId, Ledger } from './chains/chain.js';
+import { type ChainId, describeUnvalidated, type Ledger } from './chains/chain.js';
 import { spendGuard } from './chains/spend.js';
 import { redact, requireSeed } from './config.js';
 import { createDriver, TARGETS } from './drivers/factory.js';
@@ -107,7 +107,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
   }, async ({ orderId, asset, chain }) => {
     knownOrder(orderId);
     const { paid, to, identifier, asset: _sent, ...result } = await session.payOrder(orderId, { asset, chain });
-    if (!result.validated) throw new Error(`payment failed on the ledger: ${result.result} (tx ${result.hash}, ${result.explorer}). Check the treasury balance with wallet_status.`);
+    if (!result.validated) throw new Error(result.unconfirmed ? `${describeUnvalidated(result)} (${result.explorer}); shop_wait_for and shop_order_evidence say what arrived.` : `payment failed on the ledger: ${result.result} (tx ${result.hash}, ${result.explorer}). Check the treasury balance with wallet_status.`);
     return text({ paid, to, identifier, ...result });
   });
 
@@ -204,7 +204,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
       const seed = requireSeed(treasurySeedVariable(ledger.chain));
       await approvedOrRefuse(ledger, seed);
       const result = await ledger.pay({ seed, to, identifier, amount, asset: asset ?? ledger.nativeAsset });
-      if (!result.validated) throw new Error(`payment failed on the ledger: ${result.result} (tx ${result.hash}, ${result.explorer})`);
+      if (!result.validated) throw new Error(result.unconfirmed ? `${describeUnvalidated(result)} (${result.explorer})` : `payment failed on the ledger: ${result.result} (tx ${result.hash}, ${result.explorer})`);
       return text(result);
     });
   });

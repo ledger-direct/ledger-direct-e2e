@@ -51,6 +51,18 @@ export interface PaymentResult {
   from: string;
   /** The ledger that holds the transaction, when the chain says (XRPL, Xahau: ledger index; Stellar: ledger sequence). */
   ledgerIndex?: number;
+  /**
+   * The payer's side took the payment and nobody could confirm that it arrived: neither a
+   * success nor a failure on record. It may still arrive, so sending it again may pay twice.
+   */
+  unconfirmed?: boolean;
+}
+
+/** Why a payment is not validated: it failed, or it was taken and never confirmed. The two call for different next steps. */
+export function describeUnvalidated(result: PaymentResult): string {
+  return result.unconfirmed
+    ? `payment not confirmed: ${result.result}. It may still arrive: look at what the order received before paying again`
+    : `payment failed: ${result.result}`;
 }
 
 /**

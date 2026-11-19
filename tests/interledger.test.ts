@@ -5,7 +5,7 @@ import { GuardedLedger, SpendGuard } from '../src/chains/spend.js';
 import { fromScale, OpenPaymentsClient, parseGrantAnswer, targetUri, toScale } from '../src/chains/interledger/client.js';
 import { consentLinks, incomingPaymentId, InterledgerLedger, interledgerSettings, type InterledgerSettings, resetInterledgerGrants } from '../src/chains/interledger/ledger.js';
 import { contentDigest, privateKeyOf, signatureBase, signatureParams, signedHeaders } from '../src/chains/interledger/signature.js';
-import type { Ledger } from '../src/chains/chain.js';
+import { describeUnvalidated, type Ledger } from '../src/chains/chain.js';
 import type { Driver } from '../src/drivers/driver.js';
 import { readPaymentPage } from '../src/drivers/page.js';
 import { isPlainHttpsUrl } from '../src/drivers/shopware.js';
@@ -213,6 +213,16 @@ interface WalletOptions {
   tokenRevoked?: boolean;
   /** Somebody else fills the incoming payment; this payment sends nothing. */
   paidByAnother?: boolean;
+  /** Somebody else fills part of it; this payment sends only this much. */
+  sendsOnly?: bigint;
+  /** The paying wallet holds another asset: what it sent does not compare with what was asked. */
+  payerAsset?: { assetCode: string; assetScale: number };
+  /** The first quote reaches the wallet only once this resolves. */
+  holdFirstQuote?: Promise<void>;
+  /** The wallet takes the first quote at once and its answer arrives only once this resolves. */
+  holdFirstQuoteAnswer?: Promise<void>;
+  /** The wallet rotates at once and its answer arrives only once this resolves. */
+  holdRotation?: Promise<void>;
   /** How many reads of the outgoing payment fail before one answers; Infinity for all. */
   unreadable?: number;
 }
@@ -226,6 +236,7 @@ function wallets(options: WalletOptions = {}) {
   let token = TOKEN;
   let rotations = 0;
   let unreadable = options.unreadable ?? 0;
+  let quotes = 0;
   const json = (body: unknown, status = 200): Response => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const pending = { continue: { access_token: { value: 'continue-token' }, uri: 'https://payer.example/gnap/continue/g1', wait: 5 } };
 
@@ -240,7 +251,7 @@ function wallets(options: WalletOptions = {}) {
       // The money arrives one read after the wallet took the payment.
       if (paying !== null && !options.failPayment) {
         received += paying;
-        if (!options.paidByAnother) sent = 1_127_670_000n;
+        if (!options.paidByAnother) sent = options.sendsOnly ?? (options.payerAsset ? 150n : 1_127_670_000n);
         paying = null;
       }
       return json({ receivedAmount: { value: received.toString(), assetCode: options.incomingAsset ?? 'XRP', assetScale: 9 }, authServer: 'https://merchant.example/gnap' });
@@ -261,15 +272,22 @@ function wallets(options: WalletOptions = {}) {
       if (options.refuseRotation || headers.authorization !== `GNAP ${token}`) return json({ error: { code: 'invalid_rotation', description: 'the grant was revoked' } }, 401);
       rotations += 1;
       token = `${TOKEN}-${rotations + 1}`;
+      await options.holdRotation;
       return json({ access_token: { value: token, manage: 'https://payer.example/gnap/token/t1', expires_in: 3600 } });
     }
     if (method === 'DELETE' && url === 'https://payer.example/gnap/continue/g1') return json(null, 204);
     if (method === 'POST' && url === 'https://payer.example/quotes') {
-      if (options.tokenRevoked) return json({ error: { code: 'invalid_token', description: 'the token is not known' } }, 401);
       const receive = (requests.at(-1)!.body as { receiveAmount: { value: string } }).receiveAmount;
+      quotes += 1;
+      const first = quotes === 1;
+      if (first) await options.holdFirstQuote;
+      // A wallet knows one token per grant: the one it gave last.
+      if (options.tokenRevoked || headers.authorization !== `GNAP ${token}`) return json({ error: { code: 'invalid_token', description: 'the token is not known' } }, 401);
+      if (first) await options.holdFirstQuoteAnswer;
       return json({ id: 'https://payer.example/quotes/q1', walletAddress: PAYER, receiver: INCOMING, method: 'ilp', receiveAmount: { ...receive, assetCode: 'XRP', assetScale: 9 }, debitAmount: { value: (BigInt(receive.value) + 11_000_000n).toString(), assetCode: 'XRP', assetScale: 9 }, expiresAt: '2030-01-01T00:00:00Z' });
     }
     if (method === 'POST' && url === 'https://payer.example/outgoing-payments') {
+      if (headers.authorization !== `GNAP ${token}`) return json({ error: { code: 'invalid_token', description: 'the token is not known' } }, 401);
       paying = 1_116_670_000n;
       return json(outgoing(false));
     }
@@ -282,7 +300,7 @@ function wallets(options: WalletOptions = {}) {
     }
     return json({ error: { code: 'not_found', description: `no route for ${method}` } }, 404);
   });
-  const outgoing = (failed: boolean) => ({ id: 'https://payer.example/outgoing-payments/p1', walletAddress: PAYER, failed, receiver: INCOMING, receiveAmount: { value: '1116670000', assetCode: 'XRP', assetScale: 9 }, debitAmount: { value: '1127670000', assetCode: 'XRP', assetScale: 9 }, sentAmount: { value: sent.toString(), assetCode: 'XRP', assetScale: 9 } });
+  const outgoing = (failed: boolean) => ({ id: 'https://payer.example/outgoing-payments/p1', walletAddress: PAYER, failed, receiver: INCOMING, receiveAmount: { value: '1116670000', assetCode: 'XRP', assetScale: 9 }, debitAmount: { value: '1127670000', assetCode: 'XRP', assetScale: 9 }, sentAmount: { value: sent.toString(), ...(options.payerAsset ?? { assetCode: 'XRP', assetScale: 9 }) } });
   vi.stubGlobal('fetch', fetchStub);
   return { requests, options, of: (method: string, url: string) => requests.filter((r) => r.method === method && r.url === url) };
 }
@@ -402,6 +420,9 @@ describe('the agent pays an order', () => {
     const result = await new InterledgerLedger(settings, noWait).pay(order);
 
     expect(result).toMatchObject({ result: 'failed', validated: false, delivered: null });
+    // A failure on record is not "unconfirmed": nothing of it may still arrive.
+    expect(result.unconfirmed).toBeUndefined();
+    expect(describeUnvalidated(result)).toBe('payment failed: failed');
   });
 
   it('says so when the owner refuses, in the wallet\'s words without its control characters, and asks again next time', async () => {
@@ -484,6 +505,132 @@ describe('the agent pays an order', () => {
     expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(0);
   });
 
+  it('keeps a grant whose token another payment renewed while this one was refused with the old token', async () => {
+    let release!: () => void;
+    const w = wallets({ expiresIn: 100, holdFirstQuote: new Promise<void>((resolve) => (release = resolve)) });
+    const clock = vi.spyOn(Date, 'now');
+    let now = 1_800_000_000_000;
+    clock.mockImplementation(() => now);
+    try {
+      await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+      // The first payment's quote is on its way with the token of the moment.
+      const first = new InterledgerLedger(settings, noWait).pay(order);
+      await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(1));
+
+      // Later the token is about to lapse: a second payment renews it and pays.
+      now += 80_000;
+      await expect(new InterledgerLedger(settings, noWait).pay(order)).resolves.toMatchObject({ validated: true });
+      expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+
+      // The wallet now refuses the first payment's old token. That says nothing of the new one.
+      release();
+      await expect(first).rejects.toThrow(/quotes answered 401/);
+      expect(await new InterledgerLedger(settings, noWait).authorization(SEED)).toMatchObject({ approved: true });
+      expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  describe('while another payment renews the token', () => {
+    const gate = (): { held: Promise<void>; release: () => void } => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      return { held, release };
+    };
+    const later = (): { clock: ReturnType<typeof vi.spyOn>; pass: (ms: number) => void } => {
+      const clock = vi.spyOn(Date, 'now');
+      let now = 1_800_000_000_000;
+      clock.mockImplementation(() => now);
+      return { clock, pass: (ms) => { now += ms; } };
+    };
+    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('keeps the grant when the refusal of the old token comes before the answer with the new one', async () => {
+      const quote = gate();
+      const rotation = gate();
+      const w = wallets({ expiresIn: 100, holdFirstQuote: quote.held, holdRotation: rotation.held });
+      const { clock, pass } = later();
+      try {
+        await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+        const first = new InterledgerLedger(settings, noWait).pay(order);
+        await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(1));
+
+        // The second payment's rotation is done at the wallet; its answer is still on the way.
+        pass(80_000);
+        const second = new InterledgerLedger(settings, noWait).pay(order);
+        await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1));
+
+        // Meanwhile the first payment is refused with the old token.
+        quote.release();
+        await tick();
+        await tick();
+        rotation.release();
+
+        await expect(first).rejects.toThrow(/quotes answered 401/);
+        await expect(second).resolves.toMatchObject({ validated: true });
+        expect(await new InterledgerLedger(settings, noWait).authorization(SEED)).toMatchObject({ approved: true });
+        expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('sends the payment with the renewed token when the rotation fell between its quote and it', async () => {
+      const answer = gate();
+      const w = wallets({ expiresIn: 100, holdFirstQuoteAnswer: answer.held });
+      const { clock, pass } = later();
+      try {
+        await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+        // The wallet has taken the first payment's quote; the answer is on its way.
+        const first = new InterledgerLedger(settings, noWait).pay(order);
+        await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(1));
+
+        pass(80_000);
+        await expect(new InterledgerLedger(settings, noWait).pay(order)).resolves.toMatchObject({ validated: true });
+
+        answer.release();
+        await expect(first).resolves.toMatchObject({ validated: true });
+        expect(w.of('POST', 'https://payer.example/outgoing-payments').map((p) => p.headers.authorization)).toEqual([`GNAP ${TOKEN}-2`, `GNAP ${TOKEN}-2`]);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+  });
+
+  it('rotates earlier for "approved" than a payment would, so the payment that follows need not', async () => {
+    // Sixty seconds left: a payment would not rotate yet, authorization() does.
+    const w = wallets({ expiresIn: 60 });
+    const ledger = new InterledgerLedger(settings, noWait);
+    await ledger.authorize(SEED, () => {});
+
+    expect(await ledger.authorization(SEED)).toMatchObject({ approved: true });
+    expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+    await ledger.pay(order);
+    expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+  });
+
+  it('approves a token that cannot be rotated for as long as it lasts, however short', async () => {
+    // Enforcing a lifetime here would never call such a wallet approved, and ask its owner without end.
+    const w = wallets({ expiresIn: 60, noManage: true });
+    const ledger = new InterledgerLedger(settings, noWait);
+    await ledger.authorize(SEED, () => {});
+
+    expect(await ledger.authorization(SEED)).toMatchObject({ approved: true });
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+  });
+
+  it('calls a grant approved only while its token outlasts the payment that follows', async () => {
+    // Sixty seconds left: more than a payment waits for before it rotates, less than "approved" promises.
+    const w = wallets({ expiresIn: 60, refuseRotation: true });
+    await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+    const waiting = new InterledgerLedger(settings, () => new Promise<void>(() => {}));
+
+    await expect(approvedOrRefuse(waiting, SEED)).rejects.toThrow(/has not approved the agent yet/);
+    expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+  });
+
   describe('once the wallet took the payment', () => {
     const untilTheDeadline = () => {
       const clock = vi.spyOn(Date, 'now');
@@ -498,11 +645,31 @@ describe('the agent pays an order', () => {
       try {
         const result = await new InterledgerLedger(settings, sleep).pay(order);
         // The incoming payment is full, and this payment sent nothing.
-        expect(result).toMatchObject({ result: 'not arrived in time', validated: false });
+        expect(result).toMatchObject({ result: 'accepted by the paying wallet as https://payer.example/outgoing-payments/p1, not arrived in time', validated: false, unconfirmed: true });
       } finally {
         clock.mockRestore();
       }
       expect(w.of('POST', 'https://payer.example/outgoing-payments')).toHaveLength(1);
+    });
+
+    it('does not take the amount for its own when it sent only part of it and somebody else paid in the rest', async () => {
+      wallets({ sendsOnly: 500_000_000n });
+      const { clock, sleep } = untilTheDeadline();
+      try {
+        const result = await new InterledgerLedger(settings, sleep).pay(order);
+        // Sent in the receiver's own asset, and less than the amount: it cannot have delivered it.
+        expect(result).toMatchObject({ validated: false, unconfirmed: true });
+        expect(result.result).toMatch(/^accepted by the paying wallet as .*, not arrived in time$/);
+        expect(describeUnvalidated(result)).toMatch(/^payment not confirmed: accepted by the paying wallet .* It may still arrive: look at what the order received before paying again$/);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('goes by the receiver\'s total where the payer\'s asset is another: what was sent does not compare', async () => {
+      wallets({ payerAsset: { assetCode: 'USD', assetScale: 2 } });
+
+      await expect(new InterledgerLedger(settings, noWait).pay(order)).resolves.toMatchObject({ result: 'completed', validated: true, delivered: '1.116670000' });
     });
 
     it('asks again when a read fails, and still reports the payment', async () => {
@@ -517,7 +684,7 @@ describe('the agent pays an order', () => {
       const { clock, sleep } = untilTheDeadline();
       try {
         const result = await new InterledgerLedger(settings, sleep).pay(order);
-        expect(result.validated).toBe(false);
+        expect(result).toMatchObject({ validated: false, unconfirmed: true });
         expect(result.result).toBe('accepted by the paying wallet as https://payer.example/outgoing-payments/p1, not confirmed: GET https://payer.example/outgoing-payments/p1 answered 503 (unavailable: try later)');
       } finally {
         clock.mockRestore();

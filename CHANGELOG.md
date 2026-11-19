@@ -32,6 +32,15 @@
   harness's own outgoing payment has sent something: money somebody else paid in is not taken for it.
   A read that fails after the wallet took the payment is repeated; a payment that can never be read
   back is reported as "accepted by the paying wallet as …, not confirmed", not as an error to retry.
+- In the receiver's own asset an Interledger payment has to have sent at least the amount before the
+  incoming payment's total counts as its own; in another asset, anything at all. A payment the wallet
+  took and that was not seen to arrive carries `unconfirmed: true` and the outgoing payment's id in
+  its result, also when it merely did not arrive in time, and the runner, `record` and the MCP tools
+  say "not confirmed" for it instead of "failed".
+- A 401 for a token another payment has renewed, or is renewing, no longer forgets the renewed
+  grant, and each request of a payment goes out with the grant's token of that moment.
+  `authorization()` rotates a minute earlier than a payment would, so the payment after an
+  "approved" need not; a token that cannot be rotated is approved for as long as it lasts.
 - A grant is kept by what was asked (paying wallet, client, key, limit). One whose token the wallet no
   longer knows (401) is forgotten; a token is rotated once however many payments need it; and a caller
   that does not wait gets the new place to approve when the wallet will not renew it.

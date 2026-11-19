@@ -116,6 +116,14 @@ const APPROVAL_WAIT_MS = 10 * 60 * 1000;
 const DELIVERY_WAIT_MS = 90_000;
 /** A token this close to its end is rotated before it is used. */
 const ROTATE_BEFORE_MS = 30_000;
+/**
+ * How much earlier than that authorization() rotates: the payment that follows its "approved"
+ * then finds a token it need not rotate, and does not end up waiting for the owner. An effort,
+ * not a promise: a token that cannot be rotated, or a wallet whose tokens live shorter than
+ * this, is approved for as long as the token lasts. Asking for more would never call such a
+ * wallet approved and ask its owner without end.
+ */
+const APPROVED_FOR_MS = 60_000;
 
 /** One request to an owner: the grant once it is given, and until then where the owner decides. */
 interface GrantRequest {
@@ -244,7 +252,7 @@ export class InterledgerLedger implements Ledger {
     await this.outOrDecided(request);
     // A grant whose token the wallet will not renew is no approval. The owner is asked again
     // here, and the caller told where: a payment after this answer does not wait for them.
-    if (request.grant && !(await this.renewed(seed, request, request.grant))) {
+    if (request.grant && !(await this.renewed(seed, request, request.grant, ROTATE_BEFORE_MS + APPROVED_FOR_MS))) {
       request = this.request(seed, announce);
       await this.outOrDecided(request);
     }
@@ -273,26 +281,37 @@ export class InterledgerLedger implements Ledger {
 
     const granted = await this.usable(request.seed, (line) => console.error(line));
     const client = this.clientFor(request.seed);
+    // Each request goes out with the grant's token of that moment: another payment may rotate
+    // it between the two. `used` is the one the last request carried.
+    let used = granted.token;
     let payment: OutgoingPayment;
     try {
-      const quote = await client.createQuote(granted.wallet, granted.token, request.to, receive);
-      payment = await client.createOutgoingPayment(granted.wallet, granted.token, quote.id);
+      const quote = await client.createQuote(granted.wallet, used, request.to, receive);
+      used = granted.token;
+      payment = await client.createOutgoingPayment(granted.wallet, used, quote.id);
     } catch (error) {
-      // A token the wallet no longer knows pays nothing again: the next payment asks the owner.
-      // Nothing is sent a second time here; whoever called decides that.
-      if (isUnauthorized(error) && grants.get(this.grantId())?.grant === granted) grants.delete(this.grantId());
+      if (isUnauthorized(error)) await this.forgetIfStill(used);
       throw error;
     }
 
     // Two things say that this payment arrived. The receiver: the incoming payment holds the
-    // amount more than before. The payer: this outgoing payment has sent something and has not
-    // failed, so the amount is not somebody else's. An outgoing payment names what it sent in
-    // the payer's asset and nothing of what was delivered, so the receiver's total stays the measure.
+    // amount more than before. The payer: this outgoing payment has not failed and has sent
+    // enough for the amount to be its own, not somebody else's (sentEnough).
     const target = BigInt(before.value) + BigInt(receive.value);
     const deadline = Date.now() + DELIVERY_WAIT_MS;
     let received = before;
     let unread: unknown;
-    const arrived = (): boolean => !payment.failed && BigInt(received.value) >= target && BigInt(payment.sentAmount.value) > 0n;
+    // What a payment sent bounds what it delivered: on the way an amount only gets smaller.
+    // In the receiver's own asset the two compare, and a payment that sent less than the amount
+    // did not deliver it, whatever the incoming payment holds. In another asset they do not
+    // compare, and Open Payments says nothing of what was delivered: there, that the payment
+    // sent anything at all is the most the payer's side can add to the receiver's total.
+    const sentEnough = (): boolean => {
+      const sent = payment.sentAmount;
+      const comparable = sent.assetCode.toUpperCase() === receive.assetCode.toUpperCase() && sent.assetScale === receive.assetScale;
+      return BigInt(sent.value) >= (comparable ? BigInt(receive.value) : 1n);
+    };
+    const arrived = (): boolean => !payment.failed && BigInt(received.value) >= target && sentEnough();
     while (!payment.failed && !arrived() && Date.now() < deadline) {
       await this.sleep(1500);
       try {
@@ -305,15 +324,18 @@ export class InterledgerLedger implements Ledger {
       }
     }
     const delivered = BigInt(received.value) - BigInt(before.value);
-    // Accepted and never read back is not "failed": sending again could pay twice.
-    const unconfirmed = `accepted by the paying wallet as ${payment.id}, not confirmed: ${unread instanceof Error ? unread.message : 'it could not be read back'}`;
+    // Taken by the wallet and not seen to arrive is not "failed": it may still arrive, and
+    // sending it again could pay twice. The result names the payment at the paying wallet.
+    const unconfirmed = !arrived() && !payment.failed;
+    const why = unread !== undefined ? `not confirmed: ${unread instanceof Error ? unread.message : 'it could not be read back'}` : 'not arrived in time';
     return {
       hash: incomingPaymentId(request.to),
-      result: arrived() ? 'completed' : payment.failed ? 'failed' : unread !== undefined ? unconfirmed : 'not arrived in time',
+      result: arrived() ? 'completed' : payment.failed ? 'failed' : `accepted by the paying wallet as ${payment.id}, ${why}`,
       validated: arrived(),
       delivered: delivered > 0n ? fromScale(delivered.toString(), received.assetScale) : null,
       explorer: request.to,
       from: this.settings.payingWalletAddress,
+      ...(unconfirmed ? { unconfirmed: true } : {}),
     };
   }
 
@@ -327,6 +349,20 @@ export class InterledgerLedger implements Ledger {
 
   async close(): Promise<void> {
     // Nothing is held open. The grant stays for the process: the next ledger of it pays under the same approval.
+  }
+
+  /**
+   * A token the wallet no longer knows pays nothing again: the grant is forgotten and the next
+   * payment asks the owner. Unless the token was only replaced: a rotation by another payment
+   * ends the old token at the wallet before its answer is here, so one under way is waited for,
+   * and the grant goes only if it still holds the refused token. Nothing is sent a second time
+   * here; whoever called decides that.
+   */
+  private async forgetIfStill(refused: AccessToken): Promise<void> {
+    const id = this.grantId();
+    const cached = grants.get(id);
+    await cached?.rotating?.catch(() => undefined);
+    if (cached !== undefined && grants.get(id) === cached && cached.grant?.token === refused) grants.delete(id);
   }
 
   private clientFor(seed: string): OpenPaymentsClient {
@@ -424,10 +460,10 @@ export class InterledgerLedger implements Ledger {
    * and take a grant for dead that has just been renewed. False when the wallet refused:
    * the grant is forgotten, and the owner has to be asked again.
    */
-  private async renewed(seed: string, request: GrantRequest, granted: Granted): Promise<boolean> {
+  private async renewed(seed: string, request: GrantRequest, granted: Granted, before = ROTATE_BEFORE_MS): Promise<boolean> {
     if (request.rotating === undefined) {
       const { expiresAt, manage } = granted.token;
-      if (expiresAt === undefined || expiresAt - Date.now() > ROTATE_BEFORE_MS || !manage) return true;
+      if (expiresAt === undefined || expiresAt - Date.now() > before || !manage) return true;
       request.rotating = this.clientFor(seed)
         .rotate(granted.token)
         .then((token) => {
