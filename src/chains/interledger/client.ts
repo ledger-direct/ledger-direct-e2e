@@ -8,8 +8,8 @@ import { signedHeaders } from './signature.js';
  * the owner, quote, pay, and read the payment back.
  *
  * Written against the specifications, not around one wallet: the same calls reach a
- * Dassie node and a Rafiki wallet. Requests go to the URLs the wallet names, exactly
- * as it names them. No token and no key ever reaches an error message.
+ * Dassie node and a Rafiki wallet. Requests go to the URLs the wallet names, and are
+ * signed for the form they are sent in. No token and no key ever reaches an error message.
  */
 export interface Amount {
   value: string;
@@ -199,7 +199,11 @@ export class OpenPaymentsClient {
     return outgoingPaymentOf(await this.send('GET', id, undefined, token.value));
   }
 
-  private async send(method: string, url: string, body?: unknown, token?: string): Promise<unknown> {
+  private async send(method: string, named: string, body?: unknown, token?: string): Promise<unknown> {
+    // What is signed is what is sent. fetch writes a URL in its canonical form (the host in
+    // lower case, no default port, a path of at least "/"), and whoever verifies the signature
+    // builds @target-uri from the request that arrives, not from the string the wallet named.
+    const url = targetUri(named);
     const text = body === undefined ? undefined : JSON.stringify(body);
     const headers = signedHeaders({ method, url, ...(text !== undefined ? { body: text } : {}), ...(token !== undefined ? { authorization: `GNAP ${token}` } : {}) }, this.keyId, this.key);
     const response = await httpFetch(url, { method, headers, ...(text !== undefined ? { body: text } : {}) });
@@ -248,6 +252,13 @@ function refusal(method: string, url: string, status: number, raw: string, token
   const clean = (text: string): string => (token ? text.replaceAll(token, '[token]') : text).replace(/[^\x20-\x7e]/g, ' ').slice(0, 300);
   const said = [code, description].filter((part): part is string => part !== undefined).map(clean).join(': ');
   return new OpenPaymentsError(`${method} ${describeUrl(url)} answered ${status}${said ? ` (${said})` : ''}`, status, code);
+}
+
+/** A URL as fetch sends it, without a fragment, which never leaves the client. */
+export function targetUri(url: string): string {
+  const target = new URL(url);
+  target.hash = '';
+  return target.href;
 }
 
 function trimSlash(url: string): string {

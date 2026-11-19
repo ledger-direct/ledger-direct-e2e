@@ -28,6 +28,22 @@
   does not wait, before the owner is asked again.
 - PS-12 on a chain with an account per quote compares the account alone: the page shows no identifier
   beside it, and the status carries its amounts as objects there.
+- An Interledger payment counts as arrived when the incoming payment holds the amount *and* the
+  harness's own outgoing payment has sent something: money somebody else paid in is not taken for it.
+  A read that fails after the wallet took the payment is repeated; a payment that can never be read
+  back is reported as "accepted by the paying wallet as …, not confirmed", not as an error to retry.
+- A grant is kept by what was asked (paying wallet, client, key, limit). One whose token the wallet no
+  longer knows (401) is forgotten; a token is rotated once however many payments need it; and a caller
+  that does not wait gets the new place to approve when the wallet will not renew it.
+- Requests are signed for the URL in the form fetch sends it (host in lower case, no default port, a
+  path of at least `/`), whatever form the wallet named it in.
+- A waiting request is withdrawn when the wallet answers with a server error, not only when the
+  harness gives up; a request refused at once is told to the caller who asked, and not again.
+- MCP: `shop_place_order` takes `EUR`, `USD` and `DSUSD`, the assets an Interledger wallet may hold.
+- Shopware driver: the record of an incoming payment is read where its URL names a port.
+- PS-12 takes only a number or a decimal for `amount_requested`; `{ "value": null }` no longer passes.
+- `ld-e2e record`: a grant the owner refuses or lets lapse ends the recording like any other failure,
+  in the log and in `recording.json`.
 - `ld-e2e record --color-scheme light|dark` (MCP: `colorScheme`), `light` by default: what the pages see as
   `prefers-color-scheme`. Headless Chrome took the system's before, so a Mac in dark mode filmed a dark payment
   page. The default folder name includes the scheme; `recording.json` records it always.

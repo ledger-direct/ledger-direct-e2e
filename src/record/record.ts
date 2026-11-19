@@ -130,20 +130,6 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
   log(`record ${request.target}${request.try ? ' (try)' : ''}, ${request.asset} on ${request.chain}, start ${request.start}, ${size.width}x${size.height}, ${facts.colorScheme} → ${outDir}`);
   if (facts.pluginVersion) log(`plugin ${facts.pluginVersion}`);
 
-  // A payer that needs somebody's word (Interledger: the paying wallet's owner) gets it before
-  // anything is filmed or ordered: a quote runs out, and a film of a waiting page is no film.
-  // Where they decide is for the person at the terminal, not for the log beside the video.
-  const asking = ledgerFor(request.chain);
-  try {
-    if (asking.authorize) {
-      log('asking the paying wallet\'s owner for the grant');
-      await asking.authorize(seed, (line) => request.log?.(redact(line)));
-      log('the owner approved');
-    }
-  } finally {
-    await asking.close();
-  }
-
   let browser: Browser | undefined;
   let filming: ScreenRecorder | undefined;
   let failureStill: (() => Promise<unknown>) | undefined;
@@ -153,6 +139,21 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
     return recorder ? recorder.stop() : Date.now();
   };
   try {
+    // A payer that needs somebody's word (Interledger: the paying wallet's owner) gets it before
+    // anything is filmed or ordered: a quote runs out, and a film of a waiting page is no film.
+    // Where they decide is for the person at the terminal, not for the log beside the video.
+    // A refusal ends the recording like any other failure: logged, and in recording.json.
+    const asking = ledgerFor(request.chain);
+    try {
+      if (asking.authorize) {
+        log('asking the paying wallet\'s owner for the grant');
+        await asking.authorize(seed, (line) => request.log?.(redact(line)));
+        log('the owner approved');
+      }
+    } finally {
+      await asking.close();
+    }
+
     browser = await launchBrowser(size);
     const page = await browser.newPage();
     let pageUrl = '';

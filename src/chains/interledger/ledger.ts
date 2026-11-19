@@ -1,7 +1,7 @@
 import type { Authorization, Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult } from '../chain.js';
 import { describeUrl } from '../../http.js';
 import { INTERLEDGER_ASSETS } from './assets.js';
-import { type AccessToken, type Amount, fromScale, OpenPaymentsClient, OpenPaymentsError, type PendingGrant, readReceivedAmount, readWalletAddress, toScale, type WalletAddress } from './client.js';
+import { type AccessToken, type Amount, fromScale, OpenPaymentsClient, OpenPaymentsError, type OutgoingPayment, type PendingGrant, readReceivedAmount, readWalletAddress, toScale, type WalletAddress } from './client.js';
 import { privateKeyOf } from './signature.js';
 
 /**
@@ -127,6 +127,22 @@ interface GrantRequest {
   asks: string;
   /** The grant, once given: its token is what tells a grant that is over from one that lasts. */
   grant?: Granted;
+  /** A rotation of the token that is under way: everybody who needs the token waits for this one. */
+  rotating?: Promise<void>;
+}
+
+/**
+ * A wallet's answer that ends a request for good: it was refused, lapsed or is not known.
+ * A server in trouble (5xx) and a client told to slow down (408, 429) say nothing of the
+ * request, which may still wait in the owner's wallet.
+ */
+function isFinal(error: unknown): boolean {
+  return error instanceof OpenPaymentsError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+}
+
+/** The wallet does not know the token (any more): revoked by the owner, or run out. */
+function isUnauthorized(error: unknown): boolean {
+  return error instanceof OpenPaymentsError && error.status === 401;
 }
 
 /** A grant whose token ran out and names no place to get another: the owner has to be asked again. */
@@ -136,8 +152,9 @@ function isOver(request: GrantRequest, now = Date.now()): boolean {
 }
 
 /**
- * Grants by paying wallet and client, for the life of the process: the MCP server and a
- * catalogue run in it pay under one approval. In memory only: a token never touches a disk.
+ * Grants by what was asked (paying wallet, client, its key, the limit), for the life of the
+ * process: the MCP server and a catalogue run in it pay under one approval, and a ledger with
+ * another limit asks for its own. In memory only: a token never touches a disk.
  */
 const grants = new Map<string, GrantRequest>();
 
@@ -216,14 +233,33 @@ export class InterledgerLedger implements Ledger {
   async authorization(seed: string): Promise<Authorization> {
     // A request that ended badly since the last question is reported once, and only the
     // question after that asks the owner again: nobody is asked anew behind the caller's back.
-    const failed = failures.get(this.grantId());
-    if (failed && !grants.has(this.grantId())) {
-      failures.delete(this.grantId());
+    const id = this.grantId();
+    const failed = failures.get(id);
+    if (failed && !grants.has(id)) {
+      failures.delete(id);
       throw failed;
     }
-    const request = this.request(seed, (line) => console.error(line));
-    await Promise.race([request.asked, request.granted]);
+    const announce = (line: string): void => console.error(line);
+    let request = this.request(seed, announce);
+    await this.outOrDecided(request);
+    // A grant whose token the wallet will not renew is no approval. The owner is asked again
+    // here, and the caller told where: a payment after this answer does not wait for them.
+    if (request.grant && !(await this.renewed(seed, request, request.grant))) {
+      request = this.request(seed, announce);
+      await this.outOrDecided(request);
+    }
     return { approved: request.approved, approveAt: request.approved ? [] : request.approveAt, asks: request.asks };
+  }
+
+  /** Until the request waits in the owner's wallet or is decided. A refusal throws, and is then told. */
+  private async outOrDecided(request: GrantRequest): Promise<void> {
+    try {
+      await Promise.race([request.asked, request.granted]);
+    } catch (error) {
+      // This caller has the answer; it is not news for the next question.
+      if (failures.get(this.grantId()) === error) failures.delete(this.grantId());
+      throw error;
+    }
   }
 
   async pay(request: PaymentRequest): Promise<PaymentResult> {
@@ -237,26 +273,44 @@ export class InterledgerLedger implements Ledger {
 
     const granted = await this.usable(request.seed, (line) => console.error(line));
     const client = this.clientFor(request.seed);
-    const quote = await client.createQuote(granted.wallet, granted.token, request.to, receive);
-    const payment = await client.createOutgoingPayment(granted.wallet, granted.token, quote.id);
+    let payment: OutgoingPayment;
+    try {
+      const quote = await client.createQuote(granted.wallet, granted.token, request.to, receive);
+      payment = await client.createOutgoingPayment(granted.wallet, granted.token, quote.id);
+    } catch (error) {
+      // A token the wallet no longer knows pays nothing again: the next payment asks the owner.
+      // Nothing is sent a second time here; whoever called decides that.
+      if (isUnauthorized(error) && grants.get(this.grantId())?.grant === granted) grants.delete(this.grantId());
+      throw error;
+    }
 
-    // An outgoing payment has no state to read but `failed`; that it arrived, the receiver says.
+    // Two things say that this payment arrived. The receiver: the incoming payment holds the
+    // amount more than before. The payer: this outgoing payment has sent something and has not
+    // failed, so the amount is not somebody else's. An outgoing payment names what it sent in
+    // the payer's asset and nothing of what was delivered, so the receiver's total stays the measure.
     const target = BigInt(before.value) + BigInt(receive.value);
     const deadline = Date.now() + DELIVERY_WAIT_MS;
     let received = before;
-    let failed = payment.failed;
-    while (!failed && BigInt(received.value) < target && Date.now() < deadline) {
+    let unread: unknown;
+    const arrived = (): boolean => !payment.failed && BigInt(received.value) >= target && BigInt(payment.sentAmount.value) > 0n;
+    while (!payment.failed && !arrived() && Date.now() < deadline) {
       await this.sleep(1500);
-      received = await readReceivedAmount(request.to);
-      if (BigInt(received.value) >= target) break;
-      failed = (await client.readOutgoingPayment(granted.token, payment.id)).failed;
+      try {
+        // The wallet has the payment. A read that fails does not undo that: it is asked again.
+        received = await readReceivedAmount(request.to);
+        payment = await client.readOutgoingPayment(granted.token, payment.id);
+        unread = undefined;
+      } catch (error) {
+        unread = error;
+      }
     }
     const delivered = BigInt(received.value) - BigInt(before.value);
-    const arrived = BigInt(received.value) >= target;
+    // Accepted and never read back is not "failed": sending again could pay twice.
+    const unconfirmed = `accepted by the paying wallet as ${payment.id}, not confirmed: ${unread instanceof Error ? unread.message : 'it could not be read back'}`;
     return {
       hash: incomingPaymentId(request.to),
-      result: arrived ? 'completed' : failed ? 'failed' : 'not arrived in time',
-      validated: arrived,
+      result: arrived() ? 'completed' : payment.failed ? 'failed' : unread !== undefined ? unconfirmed : 'not arrived in time',
+      validated: arrived(),
       delivered: delivered > 0n ? fromScale(delivered.toString(), received.assetScale) : null,
       explorer: request.to,
       from: this.settings.payingWalletAddress,
@@ -339,8 +393,9 @@ export class InterledgerLedger implements Ledger {
         answer = await client.continueGrant(pending);
       }
     } catch (error) {
-      // Whatever ended the wait, nothing stays waiting in the owner's wallet.
-      if (pending && !(error instanceof OpenPaymentsError)) await client.cancelGrant(pending).catch(() => undefined);
+      // Whatever ended the wait, nothing stays waiting in the owner's wallet: withdrawn, unless
+      // the wallet itself said the request is over.
+      if (pending && !isFinal(error)) await client.cancelGrant(pending).catch(() => undefined);
       throw error instanceof OpenPaymentsError ? new Error(`the grant was not given: ${error.message}`) : error;
     }
     announce(`grant approved: up to ${this.settings.grantLimit} ${wallet.assetCode}`);
@@ -348,7 +403,7 @@ export class InterledgerLedger implements Ledger {
   }
 
   private grantId(): string {
-    return `${this.settings.payingWalletAddress}\n${this.settings.clientWalletAddress}`;
+    return [this.settings.payingWalletAddress, this.settings.clientWalletAddress, this.settings.keyId, this.settings.grantLimit].join('\n');
   }
 
   /**
@@ -360,14 +415,34 @@ export class InterledgerLedger implements Ledger {
   private async usable(seed: string, announce: (line: string) => void): Promise<Granted> {
     const request = this.request(seed, announce);
     const granted = await request.granted;
-    const { expiresAt, manage } = granted.token;
-    if (expiresAt === undefined || expiresAt - Date.now() > ROTATE_BEFORE_MS || !manage) return granted;
+    return (await this.renewed(seed, request, granted)) ? granted : this.granted(seed, announce);
+  }
+
+  /**
+   * Rotates the grant's token when it is about to lapse. One rotation at a time: a wallet
+   * ends the old token with the new one, so a second rotation beside the first would fail
+   * and take a grant for dead that has just been renewed. False when the wallet refused:
+   * the grant is forgotten, and the owner has to be asked again.
+   */
+  private async renewed(seed: string, request: GrantRequest, granted: Granted): Promise<boolean> {
+    if (request.rotating === undefined) {
+      const { expiresAt, manage } = granted.token;
+      if (expiresAt === undefined || expiresAt - Date.now() > ROTATE_BEFORE_MS || !manage) return true;
+      request.rotating = this.clientFor(seed)
+        .rotate(granted.token)
+        .then((token) => {
+          granted.token = token;
+        })
+        .finally(() => {
+          request.rotating = undefined;
+        });
+    }
     try {
-      granted.token = await this.clientFor(seed).rotate(granted.token);
-      return granted;
+      await request.rotating;
+      return true;
     } catch {
       if (grants.get(this.grantId()) === request) grants.delete(this.grantId());
-      return this.granted(seed, announce);
+      return false;
     }
   }
 }

@@ -1,4 +1,4 @@
-import { amountValue, halfOf } from '../amounts.js';
+import { halfOf, isAmount } from '../amounts.js';
 import { readPlatformState } from '../drivers/platform.js';
 import { httpFetch } from '../http.js';
 import { CaseContext, RunAborted, sleep } from './context.js';
@@ -291,7 +291,7 @@ RUNNERS['PS-12'] = async (ctx) => {
   ctx.expect(status.status === 200, `status over the Store API answers 200 (got ${status.status})`);
   const payload = JSON.parse(status.body) as StatusPayload;
   ctx.expect(payload.schema_version === 1 && payload.state === 'waiting' && payload.base_asset === ctx.ledger.nativeAsset, 'status over the Store API: schema_version 1, waiting, the native asset');
-  ctx.expect((typeof payload.amount_requested === 'number' || amountValue(payload.amount_requested) !== null) && payload.amount_paid === null && payload.shortfall === null && typeof payload.seconds_left === 'number' && payload.redirect === undefined, 'status over the Store API: the contract fields in their waiting shape, no redirect');
+  ctx.expect(isAmount(payload.amount_requested) && payload.amount_paid === null && payload.shortfall === null && typeof payload.seconds_left === 'number' && payload.redirect === undefined, 'status over the Store API: the contract fields in their waiting shape, no redirect');
 
   const forged = { ...order, secret: 'not-the-key' };
   const unknown = { ...order, id: ctx.driver.unknownOrderId() };

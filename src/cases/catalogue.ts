@@ -55,7 +55,7 @@ export const CASES: readonly CaseSpec[] = [
   { id: 'PS-01', title: 'Waiting', asset: 'XRP', summary: 'Place an order, send nothing.',
     expects: ['state waiting', 'seconds_left falls between polls', 'no redirect', 'order open'] },
   { id: 'PS-02', pays: true, title: 'Expired, then refreshed', asset: 'XRP', summary: 'Quote validity 60 s, wait, refresh.',
-    expects: ['state expired, seconds_left null', 'refresh yields a new amount', 'destination tag unchanged', 'refresh refused once something arrived'] },
+    expects: ['state expired, seconds_left null', 'refresh yields a new amount', 'destination tag unchanged (on a chain with an account per quote: a new account)', 'refresh refused once something arrived (not checked on a chain with an account per quote: it lapses with the quote)'] },
   { id: 'PS-03', pays: true, title: 'Partial, then topped up', asset: 'XRP', summary: 'Send half of the displayed amount, then the shortfall.',
     expects: ['state partial with amount_paid and shortfall', 'merchant sees the partial state', 'top-up settles: redirect, hash of the second transaction, amount_paid is the sum'] },
   { id: 'PS-04', pays: true, title: 'Wrong asset, then the right one', asset: 'USDC', needsIssuedAssets: 2, summary: 'Pay a USDC order in RLUSD, then in USDC; then an XRP order in RLUSD, then in XRP.',

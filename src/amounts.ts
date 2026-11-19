@@ -45,11 +45,21 @@ export function sameDecimal(a: string, b: string): boolean {
   return x !== null && y !== null && x === y;
 }
 
-/** The value of an amount as the status payload carries it: a number (native) or `{ value }` (issued). */
+/** The value of an amount as the status payload carries it: a number (native) or `{ value }` (issued). Null for anything else. */
 export function amountValue(amount: unknown): string | null {
-  if (amount === null || amount === undefined) return null;
-  if (typeof amount === 'number') return String(amount);
+  if (typeof amount === 'number') return Number.isFinite(amount) ? String(amount) : null;
   if (typeof amount === 'string') return amount;
-  if (typeof amount === 'object' && 'value' in amount) return String((amount as { value: unknown }).value);
+  if (typeof amount === 'object' && amount !== null && 'value' in amount) {
+    const value = (amount as { value: unknown }).value;
+    // An object that carries no value (`{ value: null }`, a nested object) is not an amount.
+    return typeof value === 'object' || value === undefined ? null : amountValue(value);
+  }
   return null;
+}
+
+/** An amount the status payload may carry: a finite number, or a decimal as text or in `{ value }`. */
+export function isAmount(amount: unknown): boolean {
+  if (typeof amount === 'number') return Number.isFinite(amount) && amount >= 0;
+  const value = amountValue(amount);
+  return value !== null && decimalUnits(value) !== null;
 }

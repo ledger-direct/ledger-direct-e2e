@@ -10,6 +10,15 @@ import { CaseSkipped } from '../runner/context.js';
 
 const run = promisify(execFile);
 
+/**
+ * An https URL with a host, a port where it names one, and a plain path: an incoming payment
+ * as a wallet names it, and nothing in it that a quoted SQL string or the shell around it
+ * would read as anything but text.
+ */
+export function isPlainHttpsUrl(value: string): boolean {
+  return /^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?\/[A-Za-z0-9._~\/-]*$/.test(value);
+}
+
 export interface ShopwareOptions {
   /** Storefront and API base, e.g. http://localhost */
   baseUrl: string;
@@ -248,7 +257,7 @@ export class ShopwareDriver implements Driver {
    */
   async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
     const container = this.options.container ?? 'shopware6_672-shopware-1';
-    if (/^https:\/\/[A-Za-z0-9._~\/-]+$/.test(destinationAccount)) {
+    if (isPlainHttpsUrl(destinationAccount)) {
       // Interledger has no table of payments: what arrived is on the order's own record, the
       // stored intent of the transaction whose incoming payment this is, once it names an amount.
       // The URL is the payment; the identifier (its id) adds nothing to it.

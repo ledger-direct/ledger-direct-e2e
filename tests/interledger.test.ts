@@ -2,12 +2,16 @@ import { generateKeyPairSync, verify } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isAccountOf, isChain, treasurySeedVariable } from '../src/chains/index.js';
 import { GuardedLedger, SpendGuard } from '../src/chains/spend.js';
-import { fromScale, OpenPaymentsClient, parseGrantAnswer, toScale } from '../src/chains/interledger/client.js';
+import { fromScale, OpenPaymentsClient, parseGrantAnswer, targetUri, toScale } from '../src/chains/interledger/client.js';
 import { consentLinks, incomingPaymentId, InterledgerLedger, interledgerSettings, type InterledgerSettings, resetInterledgerGrants } from '../src/chains/interledger/ledger.js';
 import { contentDigest, privateKeyOf, signatureBase, signatureParams, signedHeaders } from '../src/chains/interledger/signature.js';
 import type { Ledger } from '../src/chains/chain.js';
 import type { Driver } from '../src/drivers/driver.js';
 import { readPaymentPage } from '../src/drivers/page.js';
+import { isPlainHttpsUrl } from '../src/drivers/shopware.js';
+import { INTERLEDGER_ASSETS } from '../src/chains/interledger/assets.js';
+import { ORDER_ASSETS } from '../src/mcp.js';
+import { amountValue, isAmount } from '../src/amounts.js';
 import { runCases } from '../src/runner/run.js';
 import { approvedOrRefuse } from '../src/session.js';
 import { isolateEnv } from './env.js';
@@ -192,11 +196,36 @@ describe('an Interledger payment page', () => {
  * Two wallets as one fetch: the payer's authorization and resource server, and the
  * merchant's incoming payment. Every request is kept, so a test can say what was asked.
  */
-function wallets(options: { pollsUntilApproved?: number; deny?: boolean; neverDecides?: boolean; failPayment?: boolean; incomingAsset?: string; expiresIn?: number; noManage?: boolean; refuseRotation?: boolean } = {}) {
+interface WalletOptions {
+  pollsUntilApproved?: number;
+  deny?: boolean;
+  neverDecides?: boolean;
+  failPayment?: boolean;
+  incomingAsset?: string;
+  expiresIn?: number;
+  noManage?: boolean;
+  refuseRotation?: boolean;
+  /** The authorization server refuses the request itself. */
+  refuseRequest?: boolean;
+  /** The continuation answers this status instead of a decision. */
+  continueStatus?: number;
+  /** The resource server no longer knows the token. */
+  tokenRevoked?: boolean;
+  /** Somebody else fills the incoming payment; this payment sends nothing. */
+  paidByAnother?: boolean;
+  /** How many reads of the outgoing payment fail before one answers; Infinity for all. */
+  unreadable?: number;
+}
+
+function wallets(options: WalletOptions = {}) {
   const requests: Array<{ method: string; url: string; headers: Record<string, string>; body?: unknown }> = [];
   let polls = 0;
   let received = 0n;
   let paying: bigint | null = null;
+  let sent = 0n;
+  let token = TOKEN;
+  let rotations = 0;
+  let unreadable = options.unreadable ?? 0;
   const json = (body: unknown, status = 200): Response => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   const pending = { continue: { access_token: { value: 'continue-token' }, uri: 'https://payer.example/gnap/continue/g1', wait: 5 } };
 
@@ -211,23 +240,32 @@ function wallets(options: { pollsUntilApproved?: number; deny?: boolean; neverDe
       // The money arrives one read after the wallet took the payment.
       if (paying !== null && !options.failPayment) {
         received += paying;
+        if (!options.paidByAnother) sent = 1_127_670_000n;
         paying = null;
       }
       return json({ receivedAmount: { value: received.toString(), assetCode: options.incomingAsset ?? 'XRP', assetScale: 9 }, authServer: 'https://merchant.example/gnap' });
     }
-    if (method === 'POST' && url === 'https://payer.example/gnap') return json({ interact: { redirect: 'https://payer.example/gnap/interact/g1/k1', finish: 'nonce' }, ...pending });
+    if (method === 'POST' && url === 'https://payer.example/gnap') {
+      if (options.refuseRequest) return json({ error: { code: 'invalid_client', description: 'the client is not known' } }, 403);
+      return json({ interact: { redirect: 'https://payer.example/gnap/interact/g1/k1', finish: 'nonce' }, ...pending });
+    }
     if (method === 'POST' && url === 'https://payer.example/gnap/continue/g1') {
       polls += 1;
+      if (options.continueStatus) return json({ error: { code: 'unavailable', description: 'try later' } }, options.continueStatus);
       if (options.deny) return json({ error: { code: 'user_denied', description: 'the owner refused\u0007 the request' } }, 403);
       if (options.neverDecides || polls < (options.pollsUntilApproved ?? 2)) return json(pending);
       return json({ access_token: { value: TOKEN, ...(options.noManage ? {} : { manage: 'https://payer.example/gnap/token/t1' }), expires_in: options.expiresIn ?? 3600 } });
     }
     if (method === 'POST' && url === 'https://payer.example/gnap/token/t1') {
-      if (options.refuseRotation) return json({ error: { code: 'invalid_rotation', description: 'the grant was revoked' } }, 401);
-      return json({ access_token: { value: `${TOKEN}-2`, manage: 'https://payer.example/gnap/token/t1', expires_in: 3600 } });
+      // A rotation ends the token it was asked with: a second one with the old token is refused.
+      if (options.refuseRotation || headers.authorization !== `GNAP ${token}`) return json({ error: { code: 'invalid_rotation', description: 'the grant was revoked' } }, 401);
+      rotations += 1;
+      token = `${TOKEN}-${rotations + 1}`;
+      return json({ access_token: { value: token, manage: 'https://payer.example/gnap/token/t1', expires_in: 3600 } });
     }
     if (method === 'DELETE' && url === 'https://payer.example/gnap/continue/g1') return json(null, 204);
     if (method === 'POST' && url === 'https://payer.example/quotes') {
+      if (options.tokenRevoked) return json({ error: { code: 'invalid_token', description: 'the token is not known' } }, 401);
       const receive = (requests.at(-1)!.body as { receiveAmount: { value: string } }).receiveAmount;
       return json({ id: 'https://payer.example/quotes/q1', walletAddress: PAYER, receiver: INCOMING, method: 'ilp', receiveAmount: { ...receive, assetCode: 'XRP', assetScale: 9 }, debitAmount: { value: (BigInt(receive.value) + 11_000_000n).toString(), assetCode: 'XRP', assetScale: 9 }, expiresAt: '2030-01-01T00:00:00Z' });
     }
@@ -235,12 +273,18 @@ function wallets(options: { pollsUntilApproved?: number; deny?: boolean; neverDe
       paying = 1_116_670_000n;
       return json(outgoing(false));
     }
-    if (method === 'GET' && url === 'https://payer.example/outgoing-payments/p1') return json(outgoing(options.failPayment === true));
+    if (method === 'GET' && url === 'https://payer.example/outgoing-payments/p1') {
+      if (unreadable > 0) {
+        unreadable -= 1;
+        return json({ error: { code: 'unavailable', description: 'try later' } }, 503);
+      }
+      return json(outgoing(options.failPayment === true));
+    }
     return json({ error: { code: 'not_found', description: `no route for ${method}` } }, 404);
   });
-  const outgoing = (failed: boolean) => ({ id: 'https://payer.example/outgoing-payments/p1', walletAddress: PAYER, failed, receiver: INCOMING, receiveAmount: { value: '1116670000', assetCode: 'XRP', assetScale: 9 }, debitAmount: { value: '1127670000', assetCode: 'XRP', assetScale: 9 }, sentAmount: { value: '0', assetCode: 'XRP', assetScale: 9 } });
+  const outgoing = (failed: boolean) => ({ id: 'https://payer.example/outgoing-payments/p1', walletAddress: PAYER, failed, receiver: INCOMING, receiveAmount: { value: '1116670000', assetCode: 'XRP', assetScale: 9 }, debitAmount: { value: '1127670000', assetCode: 'XRP', assetScale: 9 }, sentAmount: { value: sent.toString(), assetCode: 'XRP', assetScale: 9 } });
   vi.stubGlobal('fetch', fetchStub);
-  return { requests, of: (method: string, url: string) => requests.filter((r) => r.method === method && r.url === url) };
+  return { requests, options, of: (method: string, url: string) => requests.filter((r) => r.method === method && r.url === url) };
 }
 
 const settings: InterledgerSettings = { clientWalletAddress: CLIENT, keyId: 'key-1', payingWalletAddress: PAYER, asset: 'XRP', grantLimit: '5', ownerWallet: 'https://127.0.0.1:9443' };
@@ -367,6 +411,119 @@ describe('the agent pays an order', () => {
     await expect(ledger.authorize(SEED, () => {})).rejects.toThrow('the grant was not given: POST https://payer.example/gnap/continue/g1 answered 403 (user_denied: the owner refused  the request)');
     await expect(ledger.authorize(SEED, () => {})).rejects.toThrow(/not given/);
     expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+    // The wallet said the request is over: there is nothing to withdraw.
+    expect(w.of('DELETE', 'https://payer.example/gnap/continue/g1')).toHaveLength(0);
+  });
+
+  it('withdraws a request when the wallet only says it is in trouble: the request may still wait there', async () => {
+    const w = wallets({ continueStatus: 503 });
+
+    await expect(new InterledgerLedger(settings, noWait).authorize(SEED, () => {})).rejects.toThrow(/the grant was not given: .*answered 503/);
+    expect(w.of('DELETE', 'https://payer.example/gnap/continue/g1')).toHaveLength(1);
+  });
+
+  it('tells a request the wallet refused at once to the caller who asked, and not again to the next', async () => {
+    const w = wallets({ refuseRequest: true });
+    const ledger = new InterledgerLedger(settings, noWait);
+
+    await expect(ledger.authorization(SEED)).rejects.toThrow(/answered 403 \(invalid_client/);
+    // The next question is a new request, not the old refusal a second time.
+    await expect(ledger.authorization(SEED)).rejects.toThrow(/answered 403/);
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+  });
+
+  it('asks for a grant of its own where the limit or the key differs, and shares one where nothing does', async () => {
+    const w = wallets();
+    await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+    await new InterledgerLedger({ ...settings }, noWait).authorize(SEED, () => {});
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+
+    await new InterledgerLedger({ ...settings, grantLimit: '1' }, noWait).authorize(SEED, () => {});
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+    expect((w.of('POST', 'https://payer.example/gnap')[1].body as { access_token: { access: Array<{ limits?: { debitAmount: { value: string } } }> } }).access_token.access[1].limits?.debitAmount.value).toBe('1000000000');
+
+    await new InterledgerLedger({ ...settings, keyId: 'key-2' }, noWait).authorize(SEED, () => {});
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(3);
+  });
+
+  it('forgets a grant whose token the wallet no longer knows, and sends nothing a second time', async () => {
+    const w = wallets();
+    const ledger = new InterledgerLedger(settings, noWait);
+    await ledger.authorize(SEED, () => {});
+    w.options.tokenRevoked = true;
+
+    await expect(ledger.pay(order)).rejects.toThrow('POST https://payer.example/quotes answered 401 (invalid_token: the token is not known)');
+    expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(1);
+    expect(w.of('POST', 'https://payer.example/outgoing-payments')).toHaveLength(0);
+
+    // The next question asks the owner again instead of calling the dead token an approval.
+    await ledger.authorization(SEED).catch(() => undefined);
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+  });
+
+  it('rotates a token once when two payments need it at the same time', async () => {
+    const w = wallets({ expiresIn: 10 });
+    await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+
+    const both = await Promise.all([new InterledgerLedger(settings, noWait).pay(order), new InterledgerLedger(settings, noWait).pay(order)]);
+
+    expect(both.map((r) => r.validated)).toEqual([true, true]);
+    expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+    expect(w.of('POST', 'https://payer.example/quotes').map((q) => q.headers.authorization)).toEqual([`GNAP ${TOKEN}-2`, `GNAP ${TOKEN}-2`]);
+  });
+
+  it('answers a caller that does not wait with the new place to approve when the token cannot be renewed', async () => {
+    const w = wallets({ expiresIn: 10, refuseRotation: true });
+    await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+    const waiting = new InterledgerLedger(settings, () => new Promise<void>(() => {}));
+
+    // Not "approved" for a grant that is gone, and no payment left waiting for the owner.
+    await expect(approvedOrRefuse(waiting, SEED)).rejects.toThrow(/has not approved the agent yet .*They approve at https:\/\/127\.0\.0\.1:9443\/consent\/g1\?key=k1/);
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+    expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(0);
+  });
+
+  describe('once the wallet took the payment', () => {
+    const untilTheDeadline = () => {
+      const clock = vi.spyOn(Date, 'now');
+      let now = 1_800_000_000_000;
+      clock.mockImplementation(() => now);
+      return { clock, sleep: async (ms: number): Promise<void> => { now += ms; } };
+    };
+
+    it('does not take money somebody else paid in for its own', async () => {
+      const w = wallets({ paidByAnother: true });
+      const { clock, sleep } = untilTheDeadline();
+      try {
+        const result = await new InterledgerLedger(settings, sleep).pay(order);
+        // The incoming payment is full, and this payment sent nothing.
+        expect(result).toMatchObject({ result: 'not arrived in time', validated: false });
+      } finally {
+        clock.mockRestore();
+      }
+      expect(w.of('POST', 'https://payer.example/outgoing-payments')).toHaveLength(1);
+    });
+
+    it('asks again when a read fails, and still reports the payment', async () => {
+      const w = wallets({ unreadable: 2 });
+
+      await expect(new InterledgerLedger(settings, noWait).pay(order)).resolves.toMatchObject({ result: 'completed', validated: true, delivered: '1.116670000' });
+      expect(w.of('GET', 'https://payer.example/outgoing-payments/p1')).toHaveLength(3);
+    });
+
+    it('says "accepted, not confirmed" with the payment\'s name when it can never be read back, instead of failing', async () => {
+      const w = wallets({ unreadable: Infinity });
+      const { clock, sleep } = untilTheDeadline();
+      try {
+        const result = await new InterledgerLedger(settings, sleep).pay(order);
+        expect(result.validated).toBe(false);
+        expect(result.result).toBe('accepted by the paying wallet as https://payer.example/outgoing-payments/p1, not confirmed: GET https://payer.example/outgoing-payments/p1 answered 503 (unavailable: try later)');
+      } finally {
+        clock.mockRestore();
+      }
+      expect(w.of('POST', 'https://payer.example/outgoing-payments')).toHaveLength(1);
+    });
   });
 
   it('withdraws a request the owner never decided', async () => {
@@ -473,6 +630,50 @@ describe('the client asks at the URLs the wallet names', () => {
     const again = await client.continueGrant(first.grant);
     expect(again).toMatchObject({ kind: 'pending', grant: { redirect: 'https://payer.example/gnap/interact/g1/k1' } });
     expect(w.of('POST', 'https://payer.example/gnap/continue/g1')[0].headers.authorization).toBe('GNAP continue-token');
+  });
+
+  it('signs the URL in the form it is sent in, whatever form the wallet named it in', async () => {
+    const w = wallets({ neverDecides: true });
+    const client = new OpenPaymentsClient(CLIENT, 'key-1', privateKeyOf(SEED));
+
+    await client.requestGrant('https://PAYER.example:443/gnap#top', [{ type: 'quote', actions: ['create'] }], false);
+
+    const [sent] = w.requests;
+    expect(sent.url).toBe('https://payer.example/gnap');
+    const base = signatureBase({ method: 'POST', url: 'https://payer.example/gnap', body: JSON.stringify(sent.body) }, sent.headers['signature-input'].replace(/^sig1=/, ''));
+    const signature = /^sig1=:(.+):$/.exec(sent.headers.signature)![1];
+    expect(verify(null, Buffer.from(base), pair.publicKey, Buffer.from(signature, 'base64'))).toBe(true);
+  });
+
+  it('knows the form fetch sends: a path of at least "/", no default port, no fragment', () => {
+    expect(targetUri('https://auth.example')).toBe('https://auth.example/');
+    expect(targetUri('https://Auth.Example:443/gnap/../grants?x=1#f')).toBe('https://auth.example/grants?x=1');
+    expect(targetUri('https://node.example:8443/pay/xrp')).toBe('https://node.example:8443/pay/xrp');
+  });
+});
+
+describe('what the harness takes for an incoming payment and an amount', () => {
+  it('reads the record of an incoming payment whose wallet names a port', () => {
+    expect(isPlainHttpsUrl(INCOMING)).toBe(true);
+    expect(isPlainHttpsUrl('https://wallet.example:8443/incoming-payments/p1')).toBe(true);
+    // Nothing that would end the quoted SQL string, or mean something to the shell around it.
+    for (const url of ["https://wallet.example/p1' OR '1'='1", 'https://wallet.example/$(id)', 'https://wallet.example/`id`', 'https://wallet.example/p1"', 'https://wallet.example:port/p1', 'https://wallet.example/p1?x=1', 'http://wallet.example/p1', 'https://wallet.example']) {
+      expect(isPlainHttpsUrl(url), url).toBe(false);
+    }
+  });
+
+  it('takes a number or a decimal for an amount, and nothing that only has the shape of one', () => {
+    for (const amount of [0.83211, '1.116670000', { value: '1.116670000', currency: 'XRP' }, { value: 2 }]) expect(isAmount(amount), JSON.stringify(amount)).toBe(true);
+    for (const amount of [null, undefined, { value: null }, { value: { nested: 1 } }, { value: 'abc' }, { currency: 'XRP' }, Number.NaN, 'abc', true]) expect(isAmount(amount), JSON.stringify(amount)).toBe(false);
+    expect(amountValue({ value: null })).toBeNull();
+    expect(amountValue({ value: { nested: 1 } })).toBeNull();
+    expect(amountValue({ value: '1.5' })).toBe('1.5');
+    expect(amountValue(0.83211)).toBe('0.83211');
+  });
+
+  it('lets an MCP client order in every asset an Interledger wallet may hold, and in the ledgers\' as before', () => {
+    for (const asset of [...INTERLEDGER_ASSETS, 'XRP', 'RLUSD', 'USDC', 'XAH', 'XLM', 'EURC']) expect(ORDER_ASSETS, asset).toContain(asset);
+    expect(new Set(ORDER_ASSETS).size).toBe(ORDER_ASSETS.length);
   });
 });
 
