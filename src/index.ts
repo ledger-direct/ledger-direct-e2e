@@ -12,7 +12,7 @@ export { createDriver, isTarget, TARGETS, type DriverOverrides, type Target } fr
 export { readPaymentPage, type PaymentPageFields } from './drivers/page.js';
 export { hasPlatformState, readPlatformState, type PlatformState } from './drivers/platform.js';
 export { CASES, findCase, type CaseSpec, type State } from './cases/catalogue.js';
-export { halfOf, sameDecimal, sumDecimals, amountValue } from './amounts.js';
+export { halfOf, sameDecimal, sumDecimals, amountValue, isAmount } from './amounts.js';
 export { ShopSession, type PayAmount, type PayOptions, type SessionDeps, type SessionOrder, type SessionPayment } from './session.js';
 export { observe, type Observation, type PaymentTarget } from './watch/observe.js';
 export { classify, DEVIATION_RULES, deviations, verdict, type Deviation, type DeviationId, type DeviationLevel, type DeviationOptions, type WatchQuote } from './watch/deviations.js';

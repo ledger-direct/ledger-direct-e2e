@@ -1,4 +1,4 @@
-import { halfOf } from '../amounts.js';
+import { halfOf, isAmount } from '../amounts.js';
 import { readPlatformState } from '../drivers/platform.js';
 import { httpFetch } from '../http.js';
 import { CaseContext, RunAborted, sleep } from './context.js';
@@ -201,11 +201,20 @@ RUNNERS['PS-02'] = async (ctx) => {
     await ctx.driver.refresh(order);
     const refreshed = await ctx.driver.paymentPage(order);
     ctx.expect(refreshed.state === 'waiting', 'refresh yields a fresh quote');
-    ctx.expect(refreshed.paymentIdentifier === page.paymentIdentifier && refreshed.destinationAccount === page.destinationAccount, 'destination account and payment identifier unchanged');
+    if (ctx.ledger.accountPerQuote) {
+      ctx.expect(refreshed.destinationAccount !== page.destinationAccount && refreshed.paymentIdentifier !== page.paymentIdentifier, 'the refreshed quote has an account of its own');
+    } else {
+      ctx.expect(refreshed.paymentIdentifier === page.paymentIdentifier && refreshed.destinationAccount === page.destinationAccount, 'destination account and payment identifier unchanged');
+    }
     const status = await ctx.driver.status(order);
     ctx.expect(typeof status.seconds_left === 'number' && status.seconds_left > 0, 'countdown runs again');
     ctx.note(`amount before ${page.amountDisplayed}, after ${refreshed.amountDisplayed}`);
 
+    if (ctx.ledger.accountPerQuote) {
+      // The account lapsed with the quote and takes nothing more: there is no partial payment to carry over.
+      ctx.note(`not checked on ${ctx.ledger.chain}: a partial payment across a refresh (the quote's account lapses with it)`);
+      return;
+    }
     // A refresh must not wipe a payment that already arrived.
     const second = await ctx.placeOrder(ctx.ledger.nativeAsset);
     await ctx.pay(second.page, halfOf(second.page.amountDisplayed));
@@ -266,7 +275,12 @@ RUNNERS['PS-12'] = async (ctx) => {
   const quote = JSON.parse(quoted.body) as { page?: Record<string, unknown> };
   const view = quote.page ?? {};
   ctx.expect(view.schema_version === 1 && view.state === 'waiting', 'quote.page has schema_version 1 and state waiting');
-  ctx.expect(view.destinationAccount === page.destinationAccount && String(view.destinationTag) === page.paymentIdentifier, 'quote.page names the account and identifier the page shows');
+  if (ctx.ledger.accountPerQuote) {
+    // The page shows no identifier beside such an account; the quote's is the shop's own reference.
+    ctx.expect(view.destinationAccount === page.destinationAccount, 'quote.page names the account the page shows');
+  } else {
+    ctx.expect(view.destinationAccount === page.destinationAccount && String(view.destinationTag) === page.paymentIdentifier, 'quote.page names the account and identifier the page shows');
+  }
   ctx.expect(view.amountDueDisplay === page.amountDisplayed, `quote.page.amountDueDisplay is the displayed amount (${String(view.amountDueDisplay)} vs ${page.amountDisplayed})`);
   ctx.expect(typeof view.paymentUri === 'string' && view.paymentUri !== '' && (page.paymentUri === undefined || view.paymentUri === page.paymentUri), 'quote.page carries the payment request of the QR code');
   for (const key of ['chain', 'assetLabel', 'network', 'explorerBase', 'secondsLeft', 'quoteSeconds', 'amountRequestedDisplay', 'issuer', 'currencyHex', 'amountDrops', 'xamanApiKey', 'walletConnectProjectId']) {
@@ -277,7 +291,7 @@ RUNNERS['PS-12'] = async (ctx) => {
   ctx.expect(status.status === 200, `status over the Store API answers 200 (got ${status.status})`);
   const payload = JSON.parse(status.body) as StatusPayload;
   ctx.expect(payload.schema_version === 1 && payload.state === 'waiting' && payload.base_asset === ctx.ledger.nativeAsset, 'status over the Store API: schema_version 1, waiting, the native asset');
-  ctx.expect(typeof payload.amount_requested === 'number' && payload.amount_paid === null && payload.shortfall === null && typeof payload.seconds_left === 'number' && payload.redirect === undefined, 'status over the Store API: the contract fields in their waiting shape, no redirect');
+  ctx.expect(isAmount(payload.amount_requested) && payload.amount_paid === null && payload.shortfall === null && typeof payload.seconds_left === 'number' && payload.redirect === undefined, 'status over the Store API: the contract fields in their waiting shape, no redirect');
 
   const forged = { ...order, secret: 'not-the-key' };
   const unknown = { ...order, id: ctx.driver.unknownOrderId() };

@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { z } from 'zod';
 import { CASES, findCase } from './cases/catalogue.js';
 import { CHAINS, isChain, ledgerFor, treasurySeedVariable } from './chains/index.js';
+import { INTERLEDGER_ASSETS } from './chains/interledger/assets.js';
 import type { ChainId, Ledger } from './chains/chain.js';
 import { spendGuard } from './chains/spend.js';
 import { redact, requireSeed } from './config.js';
@@ -15,7 +16,7 @@ import { hasPlatformState } from './drivers/platform.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
-import { ShopSession } from './session.js';
+import { approvedOrRefuse, ShopSession } from './session.js';
 
 /**
  * The MCP server: the same functions as the CLI, as tools for a coding
@@ -34,6 +35,9 @@ import { ShopSession } from './session.js';
  * - Every payment answers with the hash and an explorer link, so the agent
  *   can show evidence instead of claiming success.
  */
+/** Every asset an order may be quoted in, on any chain: the ledgers' own, and what an Interledger wallet may hold. */
+export const ORDER_ASSETS = [...new Set(['XRP', 'RLUSD', 'USDC', 'XAH', 'XLM', 'EURC', ...INTERLEDGER_ASSETS])] as [string, ...string[]];
+
 export function createServer(options: { session?: ShopSession } = {}): McpServer {
   const server = new McpServer({ name: 'ledger-direct-e2e', version: HARNESS_VERSION });
   // Orders, drivers and paying what a page shows live in the session — the same kernel the lab uses.
@@ -45,7 +49,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
   const targetSchema = z.enum(TARGETS).describe('the shop under test');
   const chainEnum = z.enum(CHAINS);
   const chainSchema = chainEnum.default('XRPL').describe('the chain; XRPL by default');
-  const orderAsset = z.enum(['XRP', 'RLUSD', 'USDC', 'XAH', 'XLM', 'EURC']);
+  const orderAsset = z.enum(ORDER_ASSETS);
 
   function text(data: unknown): { content: Array<{ type: 'text'; text: string }> } {
     return { content: [{ type: 'text', text: redact(typeof data === 'string' ? data : JSON.stringify(data, null, 2)) }] };
@@ -81,7 +85,7 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
     description: 'Places an order for a product paid with a LedgerDirect asset and reads the payment page: what to send, where, with which identifier. Nothing is paid yet.',
     inputSchema: {
       target: targetSchema,
-      asset: orderAsset.describe('the asset the order is quoted in; XAH places the order on Xahau, XLM and EURC on Stellar'),
+      asset: orderAsset.describe('the asset the order is quoted in; XAH places the order on Xahau, XLM and EURC on Stellar, EUR, USD and DSUSD on Interledger'),
       chain: chainEnum.optional().describe('the chain to place the order on, for an asset on several chains such as USDC; the shop\'s configured chain, else the chain that has the asset, when absent'),
       productId: z.string().optional().describe('from shop_search_products; the shop\'s cheap test article when absent'),
       quantity: z.number().int().min(1).max(100).default(1),
@@ -176,6 +180,15 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
     inputSchema: { chain: chainSchema, address: z.string() },
   }, async ({ chain, address }) => withLedger(chain, async (ledger) => text(await ledger.fund(address))));
 
+  server.registerTool('wallet_authorize', {
+    title: 'Ask the paying wallet\'s owner',
+    description: 'Interledger: asks the owner of the paying wallet, once per server start, to let the agent pay up to a limit (LD_E2E_INTERLEDGER_GRANT_LIMIT), and says whether they have approved and where they decide. Nothing is paid before they approve; afterwards every order is paid without them. Other chains need nothing: the treasury pays.',
+    inputSchema: { chain: chainSchema },
+  }, async ({ chain }) => withLedger(chain, async (ledger) => {
+    if (!ledger.authorization) return text({ chain, approved: true, note: 'nothing to approve on this chain' });
+    return text({ chain, ...(await ledger.authorization(requireSeed(treasurySeedVariable(ledger.chain)))) });
+  }));
+
   server.registerTool('pay', {
     title: 'Send a payment',
     description: `One payment from the chain treasury: exact amount, receiving account, identifier (destination tag or memo id), asset. For the catalogue's deliberate wrong payments; shop_pay_order is the safe path. Refuses amounts above ${maxPayment} and payments beyond LD_E2E_RUN_BUDGET.`,
@@ -188,7 +201,9 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
     },
   }, async ({ chain, to, amount, identifier, asset }) => {
     return withLedger(chain, async (ledger) => {
-      const result = await ledger.pay({ seed: requireSeed(treasurySeedVariable(ledger.chain)), to, identifier, amount, asset: asset ?? ledger.nativeAsset });
+      const seed = requireSeed(treasurySeedVariable(ledger.chain));
+      await approvedOrRefuse(ledger, seed);
+      const result = await ledger.pay({ seed, to, identifier, amount, asset: asset ?? ledger.nativeAsset });
       if (!result.validated) throw new Error(`payment failed on the ledger: ${result.result} (tx ${result.hash}, ${result.explorer})`);
       return text(result);
     });

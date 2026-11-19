@@ -53,7 +53,10 @@ export interface PaymentPageView {
   amountDisplayed: string;
   asset: string;
   destinationAccount: string;
-  /** Destination tag (XRPL) or memo id (Stellar) as shown, as a decimal string. */
+  /**
+   * Destination tag (XRPL) or memo id (Stellar) as shown, as a decimal string. On Interledger
+   * the page shows none: the account is an incoming payment's URL, and its id there stands in.
+   */
   paymentIdentifier: string;
   statusUrl: string;
   /** The page itself, secret included — for a person who wants to look at it. */
@@ -153,6 +156,14 @@ export interface Driver {
    * proven. Null when the platform cannot expose it; the case then falls back to timing.
    */
   nodeRequests(): Promise<number | null>;
+  /**
+   * A customer account with an address on file, made for one recording: a logged-in customer's
+   * checkout shows no address form. The password is made up here and never logged. Absent on a
+   * platform whose driver cannot register one.
+   */
+  createCustomer?(): Promise<{ email: string; password: string }>;
+  /** The product number of the article the driver buys by default, for a walk that buys it in the browser. */
+  testProductNumber?(): Promise<string>;
   /** The installed plugin's version, for a recording's manifest. Absent or null: not known. */
   pluginVersion?(): Promise<string | null>;
 }

@@ -1,13 +1,23 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AccountFinding, Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
+import { INTERLEDGER_ASSETS } from '../chains/interledger/assets.js';
 import { httpFetch } from '../http.js';
 import { orderChain } from './chains.js';
 import { readPaymentPage } from './page.js';
 import { CaseSkipped } from '../runner/context.js';
 
 const run = promisify(execFile);
+
+/**
+ * An https URL with a host, a port where it names one, and a plain path: an incoming payment
+ * as a wallet names it, and nothing in it that a quoted SQL string or the shell around it
+ * would read as anything but text.
+ */
+export function isPlainHttpsUrl(value: string): boolean {
+  return /^https:\/\/[A-Za-z0-9.-]+(:\d{1,5})?\/[A-Za-z0-9._~\/-]*$/.test(value);
+}
 
 export interface ShopwareOptions {
   /** Storefront and API base, e.g. http://localhost */
@@ -43,10 +53,10 @@ function methodIdFor(chain: string, asset: string): string {
 }
 
 /** The issued assets a chain's configuration card has a toggle for (`xrplIsRlusdEnabled`, `stellarIsUsdcEnabled`, …). */
-const TOGGLED_ASSETS: Record<string, string[]> = { XRPL: ['RLUSD', 'USDC'], STELLAR: ['USDC', 'EURC'], XAHAU: [] };
+const TOGGLED_ASSETS: Record<string, string[]> = { XRPL: ['RLUSD', 'USDC'], STELLAR: ['USDC', 'EURC'], XAHAU: [], INTERLEDGER: [] };
 
 /** Every asset a chain has a payment method for: the native one and the toggled ones. */
-const ASSETS_BY_CHAIN: Record<string, string[]> = { XRPL: ['XRP', ...TOGGLED_ASSETS.XRPL], STELLAR: ['XLM', ...TOGGLED_ASSETS.STELLAR], XAHAU: ['XAH'] };
+const ASSETS_BY_CHAIN: Record<string, string[]> = { XRPL: ['XRP', ...TOGGLED_ASSETS.XRPL], STELLAR: ['XLM', ...TOGGLED_ASSETS.STELLAR], XAHAU: ['XAH'], INTERLEDGER: [...INTERLEDGER_ASSETS] };
 
 const capitalise = (word: string): string => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
 
@@ -246,12 +256,21 @@ export class ShopwareDriver implements Driver {
    * r-address alone does not say whether it is the XRP Ledger's or Xahau's.
    */
   async recordedHashes(destinationAccount: string, paymentIdentifier: string, chain?: string): Promise<string[]> {
+    const container = this.options.container ?? 'shopware6_672-shopware-1';
+    if (isPlainHttpsUrl(destinationAccount)) {
+      // Interledger has no table of payments: what arrived is on the order's own record, the
+      // stored intent of the transaction whose incoming payment this is, once it names an amount.
+      // The URL is the payment; the identifier (its id) adds nothing to it.
+      const field = (name: string): string => `JSON_UNQUOTE(JSON_EXTRACT(custom_fields, '$.ledger_direct.${name}'))`;
+      const intents = `SELECT ${field('hash')} FROM order_transaction WHERE ${field('destination_account')} = '${destinationAccount}' AND JSON_TYPE(JSON_EXTRACT(custom_fields, '$.ledger_direct.amount_paid')) = 'OBJECT'`;
+      const { stdout } = await run('docker', ['exec', container, 'bash', '-lc', `mysql -h 127.0.0.1 -u root -proot shopware -N -e "${intents}" 2>/dev/null`]);
+      return stdout.split('\n').map((l) => l.trim()).filter((l) => l !== '' && l !== 'NULL');
+    }
     const xrplForm = /^r[1-9A-HJ-NP-Za-km-z]{24,34}$/.test(destinationAccount);
     const stellarForm = /^G[A-Z2-7]{55}$/.test(destinationAccount);
     if (!(xrplForm || stellarForm) || !/^\d+$/.test(paymentIdentifier)) {
-      throw new Error('Shopware: recordedHashes() takes an XRPL, Xahau or Stellar receiving account and a numeric identifier');
+      throw new Error('Shopware: recordedHashes() takes an XRPL, Xahau or Stellar receiving account, or an incoming payment\'s URL, and a numeric identifier');
     }
-    const container = this.options.container ?? 'shopware6_672-shopware-1';
     const sql = stellarForm
       ? `SELECT DISTINCT hash FROM ledger_direct_stellar_payment WHERE destination = '${destinationAccount}' AND memo_id = ${paymentIdentifier}`
       : `SELECT hash FROM ledger_direct_${(chain ?? this.chain).toUpperCase() === 'XAHAU' ? 'xahau' : 'xrpl'}_tx WHERE destination = '${destinationAccount}' AND destination_tag = ${paymentIdentifier}`;
@@ -274,6 +293,32 @@ export class ShopwareDriver implements Driver {
     } catch {
       return null;
     }
+  }
+
+  /** Registers a customer (not a guest) through the Store API, with the address a guest order uses. */
+  async createCustomer(): Promise<{ email: string; password: string }> {
+    const storefrontUrl = await this.salesChannelUrl();
+    const [salutationId, countryId] = await Promise.all([this.firstId('/store-api/salutation'), this.firstId('/store-api/country')]);
+    const email = `e2e-customer-${Date.now()}@example.invalid`;
+    const password = randomBytes(18).toString('base64url');
+    await this.store('POST', '/store-api/account/register', {
+      guest: false,
+      storefrontUrl,
+      salutationId,
+      firstName: 'Ada',
+      lastName: 'Agent',
+      email,
+      password,
+      acceptedDataProtection: true,
+      billingAddress: { street: 'Testweg 1', zipcode: '10115', city: 'Berlin', countryId },
+    });
+    return { email, password };
+  }
+
+  /** The number of the article placeOrder() buys: LD_E2E_SHOPWARE_TEST_PRODUCT, else the harness's own. */
+  async testProductNumber(): Promise<string> {
+    await this.ensureTestProduct();
+    return this.options.testProductNumber ?? 'LD-E2E-001';
   }
 
   /** The plugin's version as Shopware's plugin list has it; null when the admin API does not say. */

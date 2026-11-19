@@ -1,12 +1,13 @@
 import { StrKey } from '@stellar/stellar-sdk';
 import { isValidClassicAddress } from 'xrpl';
 import type { ChainId, Ledger } from './chain.js';
+import { ENV_CLIENT_PRIVATE_KEY, InterledgerLedger, isWalletAddress } from './interledger/ledger.js';
 import { GuardedLedger, spendGuard } from './spend.js';
 import { StellarLedger } from './stellar/ledger.js';
 import { XrplLedger } from './xrpl/ledger.js';
 import { XAHAU } from './xrpl/profile.js';
 
-export const CHAINS: readonly ChainId[] = ['XRPL', 'STELLAR', 'XAHAU'];
+export const CHAINS: readonly ChainId[] = ['XRPL', 'STELLAR', 'XAHAU', 'INTERLEDGER'];
 
 export function isChain(value: string): value is ChainId {
   return (CHAINS as readonly string[]).includes(value.toUpperCase());
@@ -27,13 +28,19 @@ function unguardedLedger(chain: string): Ledger {
       // The XRP Ledger's code against Xahau's network: same protocol, own nodes, own treasury —
       // which also opens a run's fresh account, since the faucet refuses repeated requests.
       return new XrplLedger(XAHAU, process.env[treasurySeedVariable('XAHAU')]?.trim() || undefined);
+    case 'INTERLEDGER':
+      return new InterledgerLedger();
     default:
       throw new Error(`unknown chain ${chain}; known: ${CHAINS.join(', ')}`);
   }
 }
 
-/** The environment variable holding the treasury seed for a chain. */
+/**
+ * The environment variable holding the payer's secret for a chain: the treasury's seed, or
+ * on Interledger the paying agent's private key, under the name the wallet file always had.
+ */
 export function treasurySeedVariable(chain: ChainId): string {
+  if (chain === 'INTERLEDGER') return ENV_CLIENT_PRIVATE_KEY;
   return `LEDGERDIRECT_TESTNET_${chain}_TREASURY_SEED`;
 }
 
@@ -42,7 +49,8 @@ export function treasurySeedVariable(chain: ChainId): string {
  * r-address on XRPL and on Xahau, a G-address on Stellar. Checked before an account
  * is written into a shop, so a Stellar card never gets an XRPL address (or the other
  * way round) from a mistyped variable or option. XRPL and Xahau share the form;
- * which network an r-address is meant for only the configuration knows.
+ * which network an r-address is meant for only the configuration knows. On Interledger
+ * the account is a wallet address, an https URL (or its short form, a payment pointer).
  */
 export function isAccountOf(chain: string, address: string): boolean {
   switch (chain.toUpperCase()) {
@@ -51,6 +59,8 @@ export function isAccountOf(chain: string, address: string): boolean {
       return isValidClassicAddress(address);
     case 'STELLAR':
       return StrKey.isValidEd25519PublicKey(address);
+    case 'INTERLEDGER':
+      return isWalletAddress(address);
     default:
       return false;
   }

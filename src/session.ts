@@ -133,13 +133,11 @@ export class ShopSession {
     const page = await this.driver(e.target).paymentPage(e.order);
     const amount = await this.amountFor(key, page, options.amount ?? 'displayed');
     const asset = options.asset ?? page.asset;
-    const result = await this.withLedger(options.chain ?? e.chain, (ledger) => ledger.pay({
-      seed: this.payerSeed(ledger.chain),
-      to: page.destinationAccount,
-      identifier: page.paymentIdentifier,
-      amount,
-      asset,
-    }));
+    const result = await this.withLedger(options.chain ?? e.chain, async (ledger) => {
+      const seed = this.payerSeed(ledger.chain);
+      await approvedOrRefuse(ledger, seed);
+      return ledger.pay({ seed, to: page.destinationAccount, identifier: page.paymentIdentifier, amount, asset });
+    });
     return { ...result, paid: `${amount} ${asset}`, asset, to: page.destinationAccount, identifier: page.paymentIdentifier };
   }
 
@@ -167,4 +165,16 @@ export class ShopSession {
     }
     return amount.exact;
   }
+}
+
+/**
+ * A payer that needs somebody's word first (Interledger: the paying wallet's owner) is not
+ * waited for here: a tool call cannot stay open while a person decides. The request goes
+ * out, and the error says where they approve; the next call pays.
+ */
+export async function approvedOrRefuse(ledger: Ledger, seed: string): Promise<void> {
+  const permission = await ledger.authorization?.(seed);
+  if (!permission || permission.approved) return;
+  const where = permission.approveAt.length > 0 ? ` They approve at ${permission.approveAt.join(' or ')}.` : '';
+  throw new Error(`the paying wallet's owner has not approved the agent yet (${permission.asks}).${where} Then pay again.`);
 }

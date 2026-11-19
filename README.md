@@ -1,6 +1,6 @@
 # ledger-direct-e2e
 
-**End-to-end tests for ledger payment integrations — XRPL, Stellar and Xahau — against a real testnet, with evidence you can look up.**
+**End-to-end tests for ledger payment integrations — XRPL, Stellar, Xahau and Interledger — against a real testnet, with evidence you can look up.**
 
 The harness plays the customer with a wallet. It reads what a shop asks for off its payment page,
 sends exactly that — or deliberately something else — as a signed transaction on the chain's
@@ -75,7 +75,7 @@ the current one is used; the PrestaShop driver checks it before its first comman
 and says to `docker compose up -d` when the stack is stopped. Started from anywhere else — the lab, an MCP
 client — set the variable.
 
-Every command takes `--chain XRPL|STELLAR|XAHAU`; without it, XRPL. Each chain has its own treasury
+Every command takes `--chain XRPL|STELLAR|XAHAU|INTERLEDGER`; without it, XRPL. Each chain has its own treasury
 wallet, and a run creates a fresh receiving account on that chain (two runs must never share an
 identifier space), sets trust lines, points the shop at it, places real orders and pays them from
 the chain's treasury. `out/report.json` holds the evidence; the console prints one checklist line per
@@ -85,13 +85,15 @@ case.
 
 The catalogue talks about a receiving account, a payment identifier, a native asset, issued assets
 and a hash — none of which is XRPL. `src/chains/chain.ts` is the contract; `xrpl/` and `stellar/`
-fulfil it. `--chain XRPL|STELLAR|XAHAU` picks one, each with its own treasury in the environment.
+fulfil it. `--chain XRPL|STELLAR|XAHAU|INTERLEDGER` picks one, each with its own treasury in the environment
+(Interledger with an agent's key instead, see below).
 
 | Chain | Identifier | Native | Faucet | Status |
 |---|---|---|---|---|
 | XRPL testnet | destination tag | XRP | `faucet.altnet.rippletest.net`, DEX top-ups | ten cases green against PrestaShop and Shopware |
 | Stellar testnet | `MEMO_ID` | XLM | Friendbot | wallets and payments with memo verified; issued assets follow the core's Stellar registry; cases run once a plugin accepts Stellar |
 | Xahau testnet | destination tag | XAH | `xahau-test.net` for the treasury; a run's fresh account is opened by the treasury | the XRPL code with Xahau's profile; cases run against Shopware (1.10.0), Magento (1.2.0), PrestaShop (0.6.0) and WooCommerce (1.5.0); the drivers point the shop at the chain `--chain` names |
+| Interledger (Open Payments, test money) | none: the incoming payment's URL | the shop wallet's asset (XRP at a Dassie node) | none: the paying wallet's owner approves a limit | an agent pays from one Dassie node into a shop on another; against Shopware (branch `feat/interledger`) PS-01 to PS-03 and PS-05 to PS-09 pass, PS-11 fails: a payment into a cancelled order's incoming payment is on record nowhere in the shop |
 
 **Xahau is the XRP Ledger's code against another network**, as in the core: `src/chains/xrpl/profile.ts`
 holds what differs — nodes, faucet, explorer, native asset, issued assets — and `XrplLedger` takes the
@@ -105,6 +107,47 @@ euros (`LD_E2E_MAX_PAYMENT` still caps every asset alike when set).
 
 A further chain of the XRPL family is one profile; one with another protocol is one class behind the
 contract, one entry in `ledgerFor()`, one treasury variable.
+
+### Interledger: an agent with a spending limit
+
+`--chain INTERLEDGER` has no ledger behind it, only two wallets that speak
+[Open Payments](https://openpayments.dev): the shop's, and the one that pays. The harness is the
+paying side, as an agent would be: it holds a key, not the wallet.
+
+| The contract says | On Interledger |
+|---|---|
+| receiving account | the shop's wallet address. A run makes none; it uses the shop's own (`LD_E2E_<TARGET>_INTERLEDGER_SHOP_ACCOUNT` or `--receiving-account`) |
+| account on the payment page | an incoming payment's URL, made for the quote. A refreshed quote has a new one |
+| payment identifier | none beside the URL; the incoming payment's id stands in |
+| treasury seed | the agent's private key (`LEDGERDIRECT_INTERLEDGER_TESTNET_CUSTOMER_PRIVATE_KEY`), with the wallet address and key id that publish it |
+| hash, explorer | the incoming payment's id and URL: anyone may read there what it received. No transaction per payment exists anywhere |
+
+**The owner approves once, then the agent pays.** Before the first payment of a process the harness
+asks the paying wallet for a grant: quotes, and outgoing payments up to `LD_E2E_INTERLEDGER_GRANT_LIMIT`
+(default 10, in the paying wallet's units). The owner decides in their wallet; the run prints where and
+waits up to ten minutes. From then on every order is quoted and paid without them, and the wallet
+refuses anything beyond the limit. The token lives in the process's memory and nowhere else.
+
+```bash
+export LD_E2E_INTERLEDGER_PAYING_WALLET=https://<customer node>/pay/xrp   # whose money
+export LD_E2E_INTERLEDGER_OWNER_WALLET=https://127.0.0.1:9443             # a Dassie owner's wallet: a link to its consent page
+export LD_E2E_SHOPWARE_INTERLEDGER_SHOP_ACCOUNT=https://<merchant node>/pay/xrp
+ld-e2e --chain INTERLEDGER run --target shopware --cases PS-01,PS-05
+```
+
+The agent is known to the paying wallet by a wallet address whose key set lists its key. A
+[Dassie](https://github.com/justmoon/dassie) node refuses a client known by its key alone for any grant
+that moves money, so the owner sees who asks; a developer key of the Interledger test wallet does.
+The client and the paying wallet need not be the same wallet, and here they are not.
+
+Written against the specifications with `node:crypto` and `fetch`, no SDK: HTTP message signatures
+(RFC 9421, Ed25519), the grant request with GNAP's redirect interaction, continuation by polling,
+quote, outgoing payment. Verified against Dassie 0.4.5 on both sides, two periphery nodes on the XRP
+Ledger testnet hub: five payments by the agent, each read back at the shop's node.
+
+What does not apply: a wallet takes one asset, so nothing can be paid "in the wrong token" (PS-04);
+the receiving-account cases (PS-13 to PS-15) are about a ledger account. An incoming payment lapses
+with its quote, so the second half of PS-02, a partial payment across a refresh, is left out.
 
 ## Drivers
 
@@ -190,7 +233,11 @@ recorded. The rules every tool keeps: testnet only; no seed ever leaves the serv
 rejected is an error, never a success with a hash. `wallet_status` shows what the server has paid
 since it started.
 
-Every tool with a `chain` takes `XRPL`, `STELLAR` or `XAHAU`, XRPL when absent. There are two
+On Interledger the paying wallet's owner approves first: `wallet_authorize` asks and says where they
+decide, and `shop_pay_order` and `pay` refuse with that place until they have, instead of holding the
+call open.
+
+Every tool with a `chain` takes `XRPL`, `STELLAR`, `XAHAU` or `INTERLEDGER`, XRPL when absent. There are two
 exceptions. `shop_place_order` uses the shop's configured chain when that has the asset, else the
 chain that does: XAH goes on Xahau, XLM and EURC on Stellar, and USDC, which exists on two chains,
 can name its chain. `shop_pay_order` pays on the chain the order was placed on unless told otherwise.
@@ -336,12 +383,16 @@ confirmation. It is for videos and posts; the raw film is cut elsewhere.
 ld-e2e record --target shopware --try                                   # RLUSD, from the payment page, 1280x720
 ld-e2e record --target shopware --try --start shop --size 1080x1080     # the whole purchase, square
 ld-e2e record --target prestashop --try --asset XRP --out ~/videos/ps   # any target, any try asset
+ld-e2e --chain INTERLEDGER record --target shopware --asset XRP --start shop --as customer \
+  --product SWDEMO10006 --compose-dir <plugin>/dev/try                  # a dev shop: cart, checkout, an agent pays, confirmation
 ```
 
 | Option | Default | |
 |---|---|---|
 | `--asset` | `RLUSD` | `XRP`, `RLUSD`, `USDC`, `XAH` (XAH pays on Xahau, without `--chain`) |
 | `--start` | `payment` | `payment`: filming starts on the payment page. `shop`: on the home page, the whole purchase |
+| `--as` | `guest` | `guest`: the walk fills the address form, on camera. `customer`: an account made for the recording is logged in off camera, so the checkout goes from the cart straight to the confirm page |
+| `--product` | the walk's own article | the product number of the article the walk buys in the browser, for a shop without the try catalogue |
 | `--size` | `1280x720` | the video size in pixels, even sides |
 | `--color-scheme` | `light` | `light` or `dark`: the pages see this `prefers-color-scheme`, whatever the system prefers (headless Chrome would otherwise follow the Mac's dark mode) |
 | `--out` | `out/recordings/<target>-<asset>-<start>-<size>-<scheme>-<timestamp>/` | |
