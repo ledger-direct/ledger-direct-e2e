@@ -1,4 +1,4 @@
-import type { AccountSetResult, Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from './chain.js';
+import type { AccountSetResult, Authorization, Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from './chain.js';
 
 /**
  * The one place every payment passes before it is signed — `ld-e2e pay`, the
@@ -136,6 +136,9 @@ export class GuardedLedger implements Ledger {
   /** Neither spends from the treasury; present only when the inner ledger has them. */
   readonly unfundedAddress?: () => string;
   readonly requireDepositAuth?: (seed: string) => Promise<AccountSetResult>;
+  /** Asking for a grant spends nothing; what is paid under it passes pay(). */
+  readonly authorize?: (seed: string, announce: (line: string) => void) => Promise<void>;
+  readonly authorization?: (seed: string) => Promise<Authorization>;
 
   constructor(
     private readonly inner: Ledger,
@@ -144,6 +147,8 @@ export class GuardedLedger implements Ledger {
     if (inner.sweep) this.sweep = (seed, to) => inner.sweep!(seed, to);
     if (inner.unfundedAddress) this.unfundedAddress = () => inner.unfundedAddress!();
     if (inner.requireDepositAuth) this.requireDepositAuth = (seed) => inner.requireDepositAuth!(seed);
+    if (inner.authorize) this.authorize = (seed, announce) => inner.authorize!(seed, announce);
+    if (inner.authorization) this.authorization = (seed) => inner.authorization!(seed);
   }
 
   get chain(): ChainId {
@@ -152,6 +157,14 @@ export class GuardedLedger implements Ledger {
 
   get nativeAsset(): string {
     return this.inner.nativeAsset;
+  }
+
+  get makesAccounts(): boolean | undefined {
+    return this.inner.makesAccounts;
+  }
+
+  get accountPerQuote(): boolean | undefined {
+    return this.inner.accountPerQuote;
   }
 
   assets(): ChainAsset[] {

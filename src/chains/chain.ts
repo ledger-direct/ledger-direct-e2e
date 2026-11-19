@@ -7,8 +7,13 @@
  * transaction hash. On XRPL those are an r-address, the destination tag,
  * XRP and IssuedCurrencyAmounts; on Stellar a G-address, the MEMO_ID (or a
  * muxed address), XLM and classic assets. The cases never know which.
+ *
+ * Interledger is the odd one: there is no ledger, only two wallets that speak Open
+ * Payments. The receiving account is the merchant's wallet address, a payment goes to
+ * an incoming payment's URL, and the payer is an agent with a grant of the wallet's
+ * owner (chains/interledger/ledger.ts).
  */
-export type ChainId = 'XRPL' | 'STELLAR' | 'XAHAU';
+export type ChainId = 'XRPL' | 'STELLAR' | 'XAHAU' | 'INTERLEDGER';
 
 export interface ChainAsset {
   /** As the shop names it: XRP, RLUSD, USDC, XLM, EURC … */
@@ -96,11 +101,43 @@ export interface AccountSetResult {
   explorer: string;
 }
 
+/** Where the payer's permission stands on a chain that needs one (Interledger: the owner's grant). */
+export interface Authorization {
+  approved: boolean;
+  /** Where the owner decides while it waits; empty once approved. For the owner's eyes, not for a report. */
+  approveAt: string[];
+  /** What was asked for, in words: "up to 10 XRP from https://…". */
+  asks: string;
+}
+
 export interface Ledger {
   readonly chain: ChainId;
   readonly nativeAsset: string;
   /** The assets this chain's testnet setup knows, native first. */
   assets(): ChainAsset[];
+  /**
+   * False on a chain where the harness cannot make a receiving account: the merchant's
+   * wallet gives it out (Interledger). A run then uses the shop's own account. Absent: true.
+   */
+  readonly makesAccounts?: boolean;
+  /**
+   * True where the account a payment page shows is made for the quote and lapses with it
+   * (Interledger: an incoming payment's URL). A refreshed quote then has a new account under
+   * the same identifier, and what the old one received is not carried over. Absent: false.
+   */
+  readonly accountPerQuote?: boolean;
+  /**
+   * Whatever the payer needs before its first payment, asked for once: on Interledger the
+   * grant of the paying wallet's owner, who decides in their wallet while this waits.
+   * `announce` gets the line that tells them where. Absent on a chain where the seed is enough.
+   */
+  authorize?(seed: string, announce: (line: string) => void): Promise<void>;
+  /**
+   * The same without waiting: asks if nobody has yet, and says at once whether the owner has
+   * approved and where they decide. For a caller that cannot hold a request open for minutes
+   * (an MCP tool); pay() itself waits.
+   */
+  authorization?(seed: string): Promise<Authorization>;
   /** A brand-new funded testnet account, optionally able to receive the issued assets. */
   createFresh(options?: { trustlines?: boolean }): Promise<FreshAccount>;
   /** Faucet top-up of an existing account. */

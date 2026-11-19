@@ -15,7 +15,7 @@ import { hasPlatformState } from './drivers/platform.js';
 import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
-import { ShopSession } from './session.js';
+import { approvedOrRefuse, ShopSession } from './session.js';
 
 /**
  * The MCP server: the same functions as the CLI, as tools for a coding
@@ -176,6 +176,15 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
     inputSchema: { chain: chainSchema, address: z.string() },
   }, async ({ chain, address }) => withLedger(chain, async (ledger) => text(await ledger.fund(address))));
 
+  server.registerTool('wallet_authorize', {
+    title: 'Ask the paying wallet\'s owner',
+    description: 'Interledger: asks the owner of the paying wallet, once per server start, to let the agent pay up to a limit (LD_E2E_INTERLEDGER_GRANT_LIMIT), and says whether they have approved and where they decide. Nothing is paid before they approve; afterwards every order is paid without them. Other chains need nothing: the treasury pays.',
+    inputSchema: { chain: chainSchema },
+  }, async ({ chain }) => withLedger(chain, async (ledger) => {
+    if (!ledger.authorization) return text({ chain, approved: true, note: 'nothing to approve on this chain' });
+    return text({ chain, ...(await ledger.authorization(requireSeed(treasurySeedVariable(ledger.chain)))) });
+  }));
+
   server.registerTool('pay', {
     title: 'Send a payment',
     description: `One payment from the chain treasury: exact amount, receiving account, identifier (destination tag or memo id), asset. For the catalogue's deliberate wrong payments; shop_pay_order is the safe path. Refuses amounts above ${maxPayment} and payments beyond LD_E2E_RUN_BUDGET.`,
@@ -188,7 +197,9 @@ export function createServer(options: { session?: ShopSession } = {}): McpServer
     },
   }, async ({ chain, to, amount, identifier, asset }) => {
     return withLedger(chain, async (ledger) => {
-      const result = await ledger.pay({ seed: requireSeed(treasurySeedVariable(ledger.chain)), to, identifier, amount, asset: asset ?? ledger.nativeAsset });
+      const seed = requireSeed(treasurySeedVariable(ledger.chain));
+      await approvedOrRefuse(ledger, seed);
+      const result = await ledger.pay({ seed, to, identifier, amount, asset: asset ?? ledger.nativeAsset });
       if (!result.validated) throw new Error(`payment failed on the ledger: ${result.result} (tx ${result.hash}, ${result.explorer})`);
       return text(result);
     });

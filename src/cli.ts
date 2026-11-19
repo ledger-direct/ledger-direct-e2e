@@ -25,7 +25,7 @@ import { RECORD_ASSETS, RECORD_COLOR_SCHEMES, RECORD_DEFAULTS, defaultOutDir, pa
 const program = new Command();
 program
   .name('ld-e2e')
-  .description('LedgerDirect end-to-end harness — testnet wallets, payments, and the PS-01…PS-15 catalogue, on XRPL, Stellar and Xahau')
+  .description('LedgerDirect end-to-end harness — testnet wallets, payments, and the PS-01…PS-15 catalogue, on XRPL, Stellar, Xahau and Interledger')
   .option('--json', 'machine-readable output')
   .option('--chain <chain>', `chain to operate on: ${CHAINS.join(' | ')}`, 'XRPL')
   .version(HARNESS_VERSION);
@@ -216,7 +216,7 @@ program
   .description('send one payment the way a customer wallet would: exact displayed amount, payment identifier, chosen asset')
   .requiredOption('--to <address>', 'receiving account shown on the payment page')
   .requiredOption('--amount <decimal>', 'the amount exactly as the page displays it')
-  .option('--id <identifier>', 'destination tag (XRPL, Xahau) or memo id (Stellar) shown on the payment page')
+  .option('--id <identifier>', 'destination tag (XRPL, Xahau) or memo id (Stellar) shown on the payment page; none on Interledger, where --to is the incoming payment')
   .option('--tag <number>', 'alias of --id')
   .option('--asset <code>', 'asset to send; the native one by default (send another one than quoted to produce PS-04)')
   .option('--partial', 'XRPL: tfPartialPayment', false)
@@ -287,7 +287,7 @@ program
   .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
   .option('--container <name>', 'Shopware: docker container for the scheduled task (LD_E2E_SHOPWARE_CONTAINER)')
   .option('--cases <ids>', 'comma-separated case IDs, "automated" (every runner but the nightly-only cases), "testnet" (every runner but the long waits: automated plus PS-04), "nightly" (every runner), or "all" (the catalogue)', 'automated')
-  .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging)')
+  .option('--receiving-account <address>', 'reuse an account instead of creating a fresh one (debugging); on Interledger the shop\'s wallet address, when LD_E2E_<TARGET>_INTERLEDGER_SHOP_ACCOUNT does not name it')
   .option('--keep-account', "leave the run's receiving account configured; by default the shop goes back to its own (LD_E2E_<TARGET>_SHOP_ACCOUNT or the wallet file's LEDGERDIRECT_TESTNET_<TARGET>_SHOP_ADDRESS)", false)
   .option('--timeout <seconds>', 'per-case wait for a state', '240')
   .option('--report <file>', 'JSON report path', 'out/report.json')

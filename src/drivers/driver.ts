@@ -53,7 +53,10 @@ export interface PaymentPageView {
   amountDisplayed: string;
   asset: string;
   destinationAccount: string;
-  /** Destination tag (XRPL) or memo id (Stellar) as shown, as a decimal string. */
+  /**
+   * Destination tag (XRPL) or memo id (Stellar) as shown, as a decimal string. On Interledger
+   * the page shows none: the account is an incoming payment's URL, and its id there stands in.
+   */
   paymentIdentifier: string;
   statusUrl: string;
   /** The page itself, secret included — for a person who wants to look at it. */

@@ -86,6 +86,19 @@ export async function runCases(options: RunOptions): Promise<Report> {
 
   try {
     let receivingAccount = options.receivingAccount;
+    if (!receivingAccount && ledger.makesAccounts === false) {
+      // No account to make: the merchant's wallet gives the address out. The run uses the shop's own.
+      receivingAccount = defaultShopAccount(options.driver.name, ledger.chain);
+      if (!receivingAccount) {
+        throw new Error(`${ledger.chain} has no throwaway accounts: name the shop's own with --receiving-account or ${shopAccountVariables(options.driver.name, ledger.chain).join(' / ')}`);
+      }
+      options.log(`receiving account for this run (${ledger.chain}): the shop's own, ${receivingAccount}`);
+    }
+    if (receivingAccount && !isAccountOf(ledger.chain, receivingAccount)) {
+      throw new Error(`${receivingAccount} is not a ${ledger.chain} account`);
+    }
+    // Before any order: a quote runs out while the payer still waits for its owner's word.
+    if (options.caseIds.some((id) => findCase(id)?.pays && notApplicable(id) === null)) await ledger.authorize?.(payerSeed, options.log);
     if (!receivingAccount) {
       // A fresh receiving account per run — two runs must never share an identifier space —
       // with trust lines to the issued assets, so the stablecoin cases can receive.

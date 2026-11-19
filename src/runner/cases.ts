@@ -201,11 +201,20 @@ RUNNERS['PS-02'] = async (ctx) => {
     await ctx.driver.refresh(order);
     const refreshed = await ctx.driver.paymentPage(order);
     ctx.expect(refreshed.state === 'waiting', 'refresh yields a fresh quote');
-    ctx.expect(refreshed.paymentIdentifier === page.paymentIdentifier && refreshed.destinationAccount === page.destinationAccount, 'destination account and payment identifier unchanged');
+    if (ctx.ledger.accountPerQuote) {
+      ctx.expect(refreshed.destinationAccount !== page.destinationAccount && refreshed.paymentIdentifier !== page.paymentIdentifier, 'the refreshed quote has an account of its own');
+    } else {
+      ctx.expect(refreshed.paymentIdentifier === page.paymentIdentifier && refreshed.destinationAccount === page.destinationAccount, 'destination account and payment identifier unchanged');
+    }
     const status = await ctx.driver.status(order);
     ctx.expect(typeof status.seconds_left === 'number' && status.seconds_left > 0, 'countdown runs again');
     ctx.note(`amount before ${page.amountDisplayed}, after ${refreshed.amountDisplayed}`);
 
+    if (ctx.ledger.accountPerQuote) {
+      // The account lapsed with the quote and takes nothing more: there is no partial payment to carry over.
+      ctx.note(`not checked on ${ctx.ledger.chain}: a partial payment across a refresh (the quote's account lapses with it)`);
+      return;
+    }
     // A refresh must not wipe a payment that already arrived.
     const second = await ctx.placeOrder(ctx.ledger.nativeAsset);
     await ctx.pay(second.page, halfOf(second.page.amountDisplayed));

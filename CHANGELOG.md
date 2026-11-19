@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- `--chain INTERLEDGER`: the harness pays as an agent over Open Payments, from a wallet whose owner
+  approved a spending limit. Once per process it asks the paying wallet for a grant (quotes, and outgoing
+  payments up to `LD_E2E_INTERLEDGER_GRANT_LIMIT`), prints where the owner decides and waits; afterwards
+  every order is quoted and paid without them. The client is written against the specifications with
+  `node:crypto` and `fetch` (RFC 9421 signatures, GNAP with the redirect interaction, continuation by
+  polling). A run uses the shop's own wallet address instead of a fresh account
+  (`LD_E2E_<TARGET>_INTERLEDGER_SHOP_ACCOUNT`); the agent's key is
+  `LEDGERDIRECT_INTERLEDGER_TESTNET_CUSTOMER_PRIVATE_KEY`, the paying wallet `LD_E2E_INTERLEDGER_PAYING_WALLET`.
+- The chain contract gained `makesAccounts`, `accountPerQuote`, `authorize()` and `authorization()`; the
+  catalogue marks the cases that pay (`pays`), so the owner is asked before the first order and only then.
+- The payment page reader takes a page without an identifier where the account is a URL (an incoming
+  payment); its id stands in.
+- MCP tool `wallet_authorize`; `shop_pay_order` and `pay` refuse with the place to approve instead of
+  waiting for a person.
+- Shopware driver: Interledger payment methods, and what arrived on an incoming payment read from the
+  order's stored intent.
 - `ld-e2e record --color-scheme light|dark` (MCP: `colorScheme`), `light` by default: what the pages see as
   `prefers-color-scheme`. Headless Chrome took the system's before, so a Mac in dark mode filmed a dark payment
   page. The default folder name includes the scheme; `recording.json` records it always.

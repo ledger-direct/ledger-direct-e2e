@@ -36,6 +36,12 @@ export interface CaseSpec {
   needsDriver?: readonly ('offeredAssets' | 'accountFindings')[];
   /** Ledger methods the case needs to put the receiving account in its state; skipped without them. */
   needsLedger?: readonly ('unfundedAddress' | 'requireDepositAuth')[];
+  /**
+   * The case sends a payment. A run with such a case lets the payer get what it needs before
+   * the first order (Ledger.authorize: on Interledger the owner's grant), so no quote runs out
+   * while somebody decides. A case that pays without the mark still pays; it only asks late.
+   */
+  pays?: boolean;
 }
 
 export type PlatformName = 'prestashop' | 'shopware' | 'woocommerce' | 'magento';
@@ -48,13 +54,13 @@ export function appliesTo(spec: CaseSpec, platform: string): boolean {
 export const CASES: readonly CaseSpec[] = [
   { id: 'PS-01', title: 'Waiting', asset: 'XRP', summary: 'Place an order, send nothing.',
     expects: ['state waiting', 'seconds_left falls between polls', 'no redirect', 'order open'] },
-  { id: 'PS-02', title: 'Expired, then refreshed', asset: 'XRP', summary: 'Quote validity 60 s, wait, refresh.',
+  { id: 'PS-02', pays: true, title: 'Expired, then refreshed', asset: 'XRP', summary: 'Quote validity 60 s, wait, refresh.',
     expects: ['state expired, seconds_left null', 'refresh yields a new amount', 'destination tag unchanged', 'refresh refused once something arrived'] },
-  { id: 'PS-03', title: 'Partial, then topped up', asset: 'XRP', summary: 'Send half of the displayed amount, then the shortfall.',
+  { id: 'PS-03', pays: true, title: 'Partial, then topped up', asset: 'XRP', summary: 'Send half of the displayed amount, then the shortfall.',
     expects: ['state partial with amount_paid and shortfall', 'merchant sees the partial state', 'top-up settles: redirect, hash of the second transaction, amount_paid is the sum'] },
-  { id: 'PS-04', title: 'Wrong asset, then the right one', asset: 'USDC', needsIssuedAssets: 2, summary: 'Pay a USDC order in RLUSD, then in USDC; then an XRP order in RLUSD, then in XRP.',
+  { id: 'PS-04', pays: true, title: 'Wrong asset, then the right one', asset: 'USDC', needsIssuedAssets: 2, summary: 'Pay a USDC order in RLUSD, then in USDC; then an XRP order in RLUSD, then in XRP.',
     expects: ['state wrong_asset, shortfall is the full request, amount_paid the delivered asset', 'merchant sees the incomplete state', 'the quoted asset settles', 'the same across the asset class (core 0.8.1)'], nightlyOnly: true },
-  { id: 'PS-05', title: 'Settled', asset: 'XRP', summary: 'Send exactly the displayed amount on a small order.',
+  { id: 'PS-05', pays: true, title: 'Settled', asset: 'XRP', summary: 'Send exactly the displayed amount on a small order.',
     expects: ['state settled with redirect', 'exactly one transition to paid', 'one payment record with the hash'] },
   { id: 'PS-06', title: 'Guest, key knowledge instead of login', asset: 'XRP', summary: 'Open page and status endpoint without a session.',
     expects: ['payment page loads', 'status endpoint answers 200'] },
@@ -62,13 +68,13 @@ export const CASES: readonly CaseSpec[] = [
     expects: ['403 or redirect', 'no indication whether the order exists'] },
   { id: 'PS-08', title: 'Throttling', asset: 'XRP', summary: 'Two status calls inside 5 s.',
     expects: ['one node request', 'both payloads of the same shape'] },
-  { id: 'PS-09', title: 'Safety net without a browser', asset: 'XRP', summary: 'Pay with the page closed, trigger cron / scheduled task.',
+  { id: 'PS-09', pays: true, title: 'Safety net without a browser', asset: 'XRP', summary: 'Pay with the page closed, trigger cron / scheduled task.',
     expects: ['order settles without a poll'] },
-  { id: 'PS-10', title: 'Late return after the checkout session is gone', asset: 'XRP', summary: 'Pay 35 minutes after checkout.',
+  { id: 'PS-10', pays: true, title: 'Late return after the checkout session is gone', asset: 'XRP', summary: 'Pay 35 minutes after checkout.',
     expects: ['status endpoint settles', 'redirect goes to an order page, not an expired return URL'], nightlyOnly: true, longWait: true },
-  { id: 'PS-11', title: 'Closed by the merchant', asset: 'XRP', summary: 'Merchant cancels, customer pays anyway, the safety net runs.',
+  { id: 'PS-11', pays: true, title: 'Closed by the merchant', asset: 'XRP', summary: 'Merchant cancels, customer pays anyway, the safety net runs.',
     expects: ['redirect present', 'no state change back to open', 'after the safety net the payment is on record for the merchant'] },
-  { id: 'PS-12', title: 'Headless: quote and status over the Store API', asset: 'XRP', summary: 'Order placed, then as a guest without a session: quote with the deepLinkCode, status over the Store API with the access key, pay, redirect; a wrong code refused like an unknown order.',
+  { id: 'PS-12', pays: true, title: 'Headless: quote and status over the Store API', asset: 'XRP', summary: 'Order placed, then as a guest without a session: quote with the deepLinkCode, status over the Store API with the access key, pay, redirect; a wrong code refused like an unknown order.',
     expects: ['quote answers 200 with page.schema_version 1 and the values the payment page shows: account, identifier, amount, payment request', 'status over the Store API answers the contract', 'a wrong code and an unknown order are refused alike, on quote and status', 'paid: status redirects to an absolute URL and names the transaction hash', 'quote refuses an order that no longer waits (410)'], targets: ['shopware'] },
   { id: 'PS-13', title: 'Receiving account without trust lines', asset: 'USDC', needsIssuedAssets: 1, needsDriver: ['offeredAssets', 'accountFindings'],
     summary: 'Point the shop at an activated account without trust lines; read the checkout and the configuration.',

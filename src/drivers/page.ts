@@ -4,7 +4,7 @@ import type { State } from '../cases/catalogue.js';
  * Reads a payment page through the markup contract of `@ledger-direct/payment-ui`
  * (its `src/README.md`): `data-ld-state`, `data-ld-amount-requested` and
  * `data-ld-asset` on the root, `[data-ld-account]` and `[data-ld-tag]` by their
- * `data-value`, `data-ld-poll-url` for the status endpoint; `data-ld-payment-uri`,
+ * `data-value` (no tag where the account is a URL: an Interledger page), `data-ld-poll-url` for the status endpoint; `data-ld-payment-uri`,
  * `data-ld-network` and `data-ld-issuer` when present (the lab shows them). No driver parses
  * platform ids or labels; a platform that renders the contract is readable.
  * Since 2026-09-28 all four plugins do (Shopware 1.4.2, PrestaShop 0.5.0,
@@ -40,7 +40,11 @@ function readContractPage(html: string, state: State): PaymentPageFields | undef
   const amount = attr(html, 'data-ld-amount-requested') ?? textOf(element(html, 'data-ld-amount'));
   const account = valueOf(element(html, 'data-ld-account'));
   const tag = valueOf(element(html, 'data-ld-tag'));
-  if (!amount || !account || !tag || !/^\d+$/.test(tag)) return undefined;
+  if (tag !== undefined && !/^\d+$/.test(tag)) return undefined;
+  // An account that is a URL names the payment by itself (Interledger: an incoming payment's
+  // URL), and the page shows no identifier beside it. The payment's id there stands in.
+  const identifier = tag ?? (account !== undefined ? urlAccountId(account) : undefined);
+  if (!amount || !account || !identifier) return undefined;
   const optional = {
     pollUrl: attr(html, 'data-ld-poll-url'),
     paymentUri: attr(html, 'data-ld-payment-uri'),
@@ -52,9 +56,19 @@ function readContractPage(html: string, state: State): PaymentPageFields | undef
     amountDisplayed: amount,
     asset: attr(html, 'data-ld-asset') || undefined,
     destinationAccount: account,
-    paymentIdentifier: tag,
+    paymentIdentifier: identifier,
     ...Object.fromEntries(Object.entries(optional).filter(([, v]) => v)),
   };
+}
+
+/** The last path segment of an https account, undefined for any other account. */
+function urlAccountId(account: string): string | undefined {
+  if (!/^https:\/\//.test(account)) return undefined;
+  try {
+    return new URL(account).pathname.split('/').filter(Boolean).pop();
+  } catch {
+    return undefined;
+  }
 }
 
 /** The value of a root attribute, entity-decoded; undefined when absent. */
