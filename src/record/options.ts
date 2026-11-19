@@ -8,6 +8,19 @@ import type { ChainId } from '../chains/chain.js';
 export const RECORD_ASSETS = ['XRP', 'RLUSD', 'USDC', 'XAH'] as const;
 export type RecordAsset = (typeof RECORD_ASSETS)[number];
 
+/**
+ * Who buys. `guest`: the walk fills the address form, on camera. `customer`: an account made for
+ * the recording is logged in off camera, so the checkout goes from the cart to the confirm page.
+ */
+export const RECORD_BUYERS = ['guest', 'customer'] as const;
+export type RecordBuyer = (typeof RECORD_BUYERS)[number];
+
+export function parseBuyer(value: string): RecordBuyer {
+  const buyer = value.trim().toLowerCase();
+  if (!(RECORD_BUYERS as readonly string[]).includes(buyer)) throw new Error(`--as: ${value} is not one of ${RECORD_BUYERS.join(', ')}`);
+  return buyer as RecordBuyer;
+}
+
 /** `payment`: from the payment page on. `shop`: the whole purchase from the home page. */
 export const RECORD_STARTS = ['payment', 'shop'] as const;
 export type RecordStart = (typeof RECORD_STARTS)[number];

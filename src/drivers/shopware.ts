@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AccountFinding, Driver, HeadlessApi, OrderOptions, PaymentPageView, PlacedOrder, Product, ShopConfig, StatusPayload } from './driver.js';
@@ -284,6 +284,32 @@ export class ShopwareDriver implements Driver {
     } catch {
       return null;
     }
+  }
+
+  /** Registers a customer (not a guest) through the Store API, with the address a guest order uses. */
+  async createCustomer(): Promise<{ email: string; password: string }> {
+    const storefrontUrl = await this.salesChannelUrl();
+    const [salutationId, countryId] = await Promise.all([this.firstId('/store-api/salutation'), this.firstId('/store-api/country')]);
+    const email = `e2e-customer-${Date.now()}@example.invalid`;
+    const password = randomBytes(18).toString('base64url');
+    await this.store('POST', '/store-api/account/register', {
+      guest: false,
+      storefrontUrl,
+      salutationId,
+      firstName: 'Ada',
+      lastName: 'Agent',
+      email,
+      password,
+      acceptedDataProtection: true,
+      billingAddress: { street: 'Testweg 1', zipcode: '10115', city: 'Berlin', countryId },
+    });
+    return { email, password };
+  }
+
+  /** The number of the article placeOrder() buys: LD_E2E_SHOPWARE_TEST_PRODUCT, else the harness's own. */
+  async testProductNumber(): Promise<string> {
+    await this.ensureTestProduct();
+    return this.options.testProductNumber ?? 'LD-E2E-001';
   }
 
   /** The plugin's version as Shopware's plugin list has it; null when the admin API does not say. */

@@ -383,12 +383,16 @@ confirmation. It is for videos and posts; the raw film is cut elsewhere.
 ld-e2e record --target shopware --try                                   # RLUSD, from the payment page, 1280x720
 ld-e2e record --target shopware --try --start shop --size 1080x1080     # the whole purchase, square
 ld-e2e record --target prestashop --try --asset XRP --out ~/videos/ps   # any target, any try asset
+ld-e2e --chain INTERLEDGER record --target shopware --asset XRP --start shop --as customer \
+  --product SWDEMO10006 --compose-dir <plugin>/dev/try                  # a dev shop: cart, checkout, an agent pays, confirmation
 ```
 
 | Option | Default | |
 |---|---|---|
 | `--asset` | `RLUSD` | `XRP`, `RLUSD`, `USDC`, `XAH` (XAH pays on Xahau, without `--chain`) |
 | `--start` | `payment` | `payment`: filming starts on the payment page. `shop`: on the home page, the whole purchase |
+| `--as` | `guest` | `guest`: the walk fills the address form, on camera. `customer`: an account made for the recording is logged in off camera, so the checkout goes from the cart straight to the confirm page |
+| `--product` | the walk's own article | the product number of the article the walk buys in the browser, for a shop without the try catalogue |
 | `--size` | `1280x720` | the video size in pixels, even sides |
 | `--color-scheme` | `light` | `light` or `dark`: the pages see this `prefers-color-scheme`, whatever the system prefers (headless Chrome would otherwise follow the Mac's dark mode) |
 | `--out` | `out/recordings/<target>-<asset>-<start>-<size>-<scheme>-<timestamp>/` | |

@@ -14,8 +14,21 @@ const run = promisify(execFile);
  */
 export type WalkToPaymentPage = (
   page: BrowserPage,
-  options: { asset: string; base: string; log?: (line: string) => void },
+  options: {
+    asset: string;
+    base: string;
+    /** `INTERLEDGER` picks that chain's payment method; a walk that does not know the option ignores it. */
+    chain?: string;
+    /** Buy this article (by its product number) instead of the walk's own. */
+    product?: { number: string };
+    /** The browser is logged in (logIn ran): the checkout shows no address form. */
+    customer?: boolean;
+    log?: (line: string) => void;
+  },
 ) => Promise<{ url: string; state?: string | null; amount?: string | null; asset?: string | null }>;
+
+/** Logs a customer in on the storefront, off camera: a walk module exports it next to walkToPaymentPage. */
+export type LogIn = (page: BrowserPage, options: { base: string; email: string; password: string }) => Promise<void>;
 
 export function walkPath(composeDir: string): string {
   return join(composeDir, 'browser', 'walk.mjs');

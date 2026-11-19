@@ -9,8 +9,8 @@ import { readPaymentPage } from '../drivers/page.js';
 import { ShopSession } from '../session.js';
 import { chromePath, launchBrowser, requireFfmpeg, ScreenRecorder, type Browser, type BrowserPage } from './browser.js';
 import { buildManifest, type RecordFacts } from './manifest.js';
-import { orderedBy, RECORD_FILES, type RecordAsset, type RecordColorScheme, type RecordStart, type VideoSize } from './options.js';
-import { findWalkModule, type WalkToPaymentPage } from './walk.js';
+import { orderedBy, RECORD_FILES, type RecordAsset, type RecordBuyer, type RecordColorScheme, type RecordStart, type VideoSize } from './options.js';
+import { findWalkModule, type LogIn, type WalkToPaymentPage } from './walk.js';
 
 /**
  * `ld-e2e record`: a real purchase on the testnet, filmed in a headless browser.
@@ -25,6 +25,10 @@ import { findWalkModule, type WalkToPaymentPage } from './walk.js';
  * the way a visitor does. The harness pays what that page shows (account, tag, amount), through
  * the spend guard like `ld-e2e pay`, and finishes as above.
  *
+ * --as customer: an account made for the recording is logged in before filming starts, so the
+ * checkout goes from the cart straight to the confirm page, without the address form. Needs the
+ * plugin's walk (it knows the login form) and a driver that can register a customer.
+ *
  * Nothing on the page is changed for the film; the page polls on its own schedule.
  */
 export interface RecordRequest {
@@ -35,6 +39,10 @@ export interface RecordRequest {
   chain: ChainId;
   asset: RecordAsset;
   start: RecordStart;
+  /** `customer`: logged in off camera, no address form in the film. Absent: a guest. */
+  buyer?: RecordBuyer;
+  /** The product number of the article the walk buys; the walk's own article when absent. */
+  product?: string;
   /** What the page is told about the viewer's colour preference; the system's is never used. */
   colorScheme: RecordColorScheme;
   size: VideoSize;
@@ -89,6 +97,9 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
   chromePath();
   await requireFfmpeg();
   const seed = requireSeed(treasurySeedVariable(request.chain));
+  const asCustomer = request.buyer === 'customer';
+  if (asCustomer && !walkModule) throw new Error(`--as customer: ${request.target} has no browser walk to log in with. Pass --compose-dir (the plugin's dev/try)`);
+  if (asCustomer && !request.driver.createCustomer) throw new Error(`--as customer: the ${request.target} driver cannot register a customer yet`);
 
   mkdirSync(outDir, { recursive: true });
   const logFile = join(outDir, RECORD_FILES.log);
@@ -110,6 +121,7 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
     start: request.start,
     colorScheme: request.colorScheme,
     orderedBy: orderedBy(request.start, walkModule),
+    ...(request.buyer ? { buyer: request.buyer } : {}),
     size,
     startedAt: new Date(),
     moments: { videoStart: null },
@@ -161,14 +173,30 @@ export async function recordPurchase(request: RecordRequest): Promise<RecordResu
       facts.moments.videoStart = await filming.start();
       await still(RECORD_FILES.first);
     };
+    const loadWalk = async () => (await import(pathToFileURL(walkModule as string).href)) as { walkToPaymentPage?: WalkToPaymentPage; logIn?: LogIn };
     const walkToPaymentPage = async () => {
-      const walk = (await import(pathToFileURL(walkModule as string).href)) as { walkToPaymentPage?: WalkToPaymentPage };
+      const walk = await loadWalk();
       if (typeof walk.walkToPaymentPage !== 'function') throw new Error(`${walkModule} exports no walkToPaymentPage(page, { asset, base })`);
       log(`walking to the payment page with ${walkModule}`);
-      await walk.walkToPaymentPage(page, { asset: request.asset.toLowerCase(), base, log });
+      await walk.walkToPaymentPage(page, {
+        asset: request.asset.toLowerCase(),
+        base,
+        chain: request.chain,
+        ...(request.product ? { product: { number: request.product } } : {}),
+        ...(asCustomer ? { customer: true } : {}),
+        log,
+      });
       await paymentPageReady(page);
       pageUrl = page.url();
     };
+    if (asCustomer) {
+      // Off camera: a customer is logged in long before they shop.
+      const walk = await loadWalk();
+      if (typeof walk.logIn !== 'function') throw new Error(`${walkModule} exports no logIn(page, { base, email, password }); --as customer needs it`);
+      const account = await request.driver.createCustomer!();
+      await walk.logIn(page, { base, email: account.email, password: account.password });
+      log('logged in as a customer made for this recording');
+    }
 
     if (facts.orderedBy === 'driver') {
       // The catalogue's way: the driver places the order, the harness pays it with payOrder().

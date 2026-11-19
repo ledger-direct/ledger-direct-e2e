@@ -20,6 +20,12 @@
   order's stored intent.
 - `ld-e2e record` asks for the grant before anything is ordered or filmed, and hides a dev shop's debug
   toolbar (Symfony's) in every page it films.
+- `ld-e2e record --as customer`: an account made for the recording is logged in off camera (the plugin's
+  walk exports `logIn`), so the film shows the cart and the checkout without the address form.
+  `--product <number>` names the article the walk buys, for a shop without the try catalogue. The walk
+  is told the chain, so it can pick an Interledger payment method.
+- A request to the paying wallet's owner that lapsed or was refused is reported once to a caller that
+  does not wait, before the owner is asked again.
 - PS-12 on a chain with an account per quote compares the account alone: the page shows no identifier
   beside it, and the status carries its amounts as objects there.
 - `ld-e2e record --color-scheme light|dark` (MCP: `colorScheme`), `light` by default: what the pages see as

@@ -32,6 +32,8 @@ export interface RecordFacts {
   colorScheme: RecordColorScheme;
   /** Who placed the order: the browser (with a walk), or the driver. */
   orderedBy: OrderedBy;
+  /** `customer` when an account made for the recording was logged in off camera; absent for a guest. */
+  buyer?: 'guest' | 'customer';
   size: VideoSize;
   startedAt: Date;
   /** The order as the driver placed it; absent when the browser placed it. */
@@ -82,6 +84,7 @@ export function buildManifest(facts: RecordFacts): Record<string, unknown> {
     asset: facts.asset,
     start: facts.start,
     orderedBy: facts.orderedBy,
+    ...(facts.buyer ? { buyer: facts.buyer } : {}),
     colorScheme: facts.colorScheme,
     order: facts.order ?? null,
     payment: facts.payment

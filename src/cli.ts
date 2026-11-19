@@ -20,7 +20,7 @@ import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
 import { HARNESS_VERSION } from './version.js';
-import { RECORD_ASSETS, RECORD_COLOR_SCHEMES, RECORD_DEFAULTS, defaultOutDir, parseAsset, parseColorScheme, parseSize, parseStart, recordChain } from './record/options.js';
+import { RECORD_ASSETS, RECORD_BUYERS, RECORD_COLOR_SCHEMES, RECORD_DEFAULTS, defaultOutDir, parseAsset, parseBuyer, parseColorScheme, parseSize, parseStart, recordChain } from './record/options.js';
 
 const program = new Command();
 program
@@ -327,6 +327,8 @@ program
   .option('--try', "the plugin's try stack (dev/try, docker compose up) instead of the dev shop", false)
   .option('--asset <code>', RECORD_ASSETS.join(' | '), RECORD_DEFAULTS.asset)
   .option('--start <where>', 'payment: from the payment page on; shop: the whole purchase from the home page (needs the plugin\'s dev/try/browser/walk.mjs)', RECORD_DEFAULTS.start)
+  .option('--as <buyer>', `who buys: ${RECORD_BUYERS.join(' | ')} (customer: an account made for the recording is logged in off camera, so the checkout shows no address form; needs the plugin\'s walk)`, 'guest')
+  .option('--product <number>', 'the product number of the article the walk buys in the browser (default: the walk\'s own article)')
   .option('--size <WxH>', 'video size, e.g. 1280x720 or 1080x1080', RECORD_DEFAULTS.size)
   .option('--color-scheme <scheme>', `prefers-color-scheme the pages see: ${RECORD_COLOR_SCHEMES.join(' | ')} (never the system's)`, RECORD_DEFAULTS.colorScheme)
   .option('--out <dir>', 'output folder (default out/recordings/<target>-<asset>-<start>-<size>-<scheme>-<timestamp>)')
@@ -335,9 +337,10 @@ program
   .option('--compose-files <files>', 'WooCommerce: comma-separated compose files (LD_E2E_WOOCOMMERCE_COMPOSE_FILES)')
   .option('--access-key <key>', 'Shopware: sales channel access key (LD_E2E_SHOPWARE_ACCESS_KEY)')
   .option('--container <name>', 'Shopware: docker container (LD_E2E_SHOPWARE_CONTAINER)')
-  .action(async (opts: { target: string; try: boolean; asset: string; start: string; size: string; colorScheme: string; out?: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
+  .action(async (opts: { target: string; try: boolean; asset: string; start: string; as: string; product?: string; size: string; colorScheme: string; out?: string; baseUrl?: string; composeDir?: string; composeFiles?: string; accessKey?: string; container?: string }) => {
     if (!isTarget(opts.target)) throw new Error(`no driver for ${opts.target} — targets: ${TARGETS.join(', ')}`);
     const asset = parseAsset(opts.asset);
+    const buyer = parseBuyer(opts.as);
     const payOn = recordChain(asset, chain());
     // The try stacks take XRP, RLUSD and USDC on the XRP Ledger and XAH on Xahau.
     if (opts.try && payOn === 'STELLAR') throw new Error('--try: the try stacks run on the XRP Ledger and Xahau testnets only');
@@ -361,6 +364,8 @@ program
       chain: payOn,
       asset,
       start,
+      ...(buyer === 'customer' ? { buyer } : {}),
+      ...(opts.product ? { product: opts.product } : {}),
       colorScheme,
       size,
       outDir: opts.out ?? defaultOutDir(opts.target, asset, start, size, new Date(), undefined, colorScheme),
