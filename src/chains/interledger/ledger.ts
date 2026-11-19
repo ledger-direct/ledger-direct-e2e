@@ -141,9 +141,17 @@ function isOver(request: GrantRequest, now = Date.now()): boolean {
  */
 const grants = new Map<string, GrantRequest>();
 
+/**
+ * How the last request ended when it ended badly (refused, lapsed), until somebody who asks
+ * without waiting has been told. Without it such a caller would never hear of it: the next
+ * question would quietly put a new request in front of the owner, and the one after that again.
+ */
+const failures = new Map<string, Error>();
+
 /** Tests only: forget every grant of the process. */
 export function resetInterledgerGrants(): void {
   grants.clear();
+  failures.clear();
 }
 
 export class InterledgerLedger implements Ledger {
@@ -195,11 +203,24 @@ export class InterledgerLedger implements Ledger {
    * decision. `announce` gets the line that tells the owner where to decide.
    */
   async authorize(seed: string, announce: (line: string) => void): Promise<void> {
-    await this.granted(seed, announce);
+    try {
+      await this.granted(seed, announce);
+    } catch (error) {
+      // This caller waited and has the answer; it is not news for the next question.
+      failures.delete(this.grantId());
+      throw error;
+    }
   }
 
   /** Asks if nobody has yet, and answers as soon as the request waits or is decided. A refusal throws. */
   async authorization(seed: string): Promise<Authorization> {
+    // A request that ended badly since the last question is reported once, and only the
+    // question after that asks the owner again: nobody is asked anew behind the caller's back.
+    const failed = failures.get(this.grantId());
+    if (failed && !grants.has(this.grantId())) {
+      failures.delete(this.grantId());
+      throw failed;
+    }
     const request = this.request(seed, (line) => console.error(line));
     await Promise.race([request.asked, request.granted]);
     return { approved: request.approved, approveAt: request.approved ? [] : request.approveAt, asks: request.asks };
@@ -278,9 +299,12 @@ export class InterledgerLedger implements Ledger {
       return granted;
     });
     grants.set(id, request);
+    failures.delete(id);
     // A refusal or a lapse is not kept: the next payment asks again.
-    request.granted.catch(() => {
-      if (grants.get(id) === request) grants.delete(id);
+    request.granted.catch((error: unknown) => {
+      if (grants.get(id) !== request) return;
+      grants.delete(id);
+      failures.set(id, error instanceof Error ? error : new Error(String(error)));
     });
     return request;
   }

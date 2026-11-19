@@ -413,6 +413,24 @@ describe('the agent pays an order', () => {
     expect(await ledger.authorization(SEED)).toEqual({ approved: true, approveAt: [], asks: 'up to 5 XRP from https://payer.example/pay/xrp' });
   });
 
+  it('tells a caller that does not wait when the request ended badly, once, before asking the owner again', async () => {
+    const w = wallets({ deny: true });
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const ledger = new InterledgerLedger(settings, () => held);
+
+    expect((await ledger.authorization(SEED)).approved).toBe(false);
+    release();
+    await vi.waitFor(async () => {
+      await expect(ledger.authorization(SEED)).rejects.toThrow(/the grant was not given: .*user_denied/);
+    });
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+
+    // Told once; the question after that is a new request.
+    await ledger.authorization(SEED).catch(() => undefined);
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+  });
+
   it('a session refuses to pay while the owner has not approved, and names the place', async () => {
     wallets({ neverDecides: true });
     const ledger = new InterledgerLedger(settings, () => new Promise<void>(() => {}));
