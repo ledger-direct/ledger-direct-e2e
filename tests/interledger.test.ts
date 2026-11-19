@@ -217,8 +217,12 @@ interface WalletOptions {
   sendsOnly?: bigint;
   /** The paying wallet holds another asset: what it sent does not compare with what was asked. */
   payerAsset?: { assetCode: string; assetScale: number };
-  /** The first quote is answered only once this resolves. */
+  /** The first quote reaches the wallet only once this resolves. */
   holdFirstQuote?: Promise<void>;
+  /** The wallet takes the first quote at once and its answer arrives only once this resolves. */
+  holdFirstQuoteAnswer?: Promise<void>;
+  /** The wallet rotates at once and its answer arrives only once this resolves. */
+  holdRotation?: Promise<void>;
   /** How many reads of the outgoing payment fail before one answers; Infinity for all. */
   unreadable?: number;
 }
@@ -268,18 +272,22 @@ function wallets(options: WalletOptions = {}) {
       if (options.refuseRotation || headers.authorization !== `GNAP ${token}`) return json({ error: { code: 'invalid_rotation', description: 'the grant was revoked' } }, 401);
       rotations += 1;
       token = `${TOKEN}-${rotations + 1}`;
+      await options.holdRotation;
       return json({ access_token: { value: token, manage: 'https://payer.example/gnap/token/t1', expires_in: 3600 } });
     }
     if (method === 'DELETE' && url === 'https://payer.example/gnap/continue/g1') return json(null, 204);
     if (method === 'POST' && url === 'https://payer.example/quotes') {
       const receive = (requests.at(-1)!.body as { receiveAmount: { value: string } }).receiveAmount;
       quotes += 1;
-      if (quotes === 1) await options.holdFirstQuote;
+      const first = quotes === 1;
+      if (first) await options.holdFirstQuote;
       // A wallet knows one token per grant: the one it gave last.
       if (options.tokenRevoked || headers.authorization !== `GNAP ${token}`) return json({ error: { code: 'invalid_token', description: 'the token is not known' } }, 401);
+      if (first) await options.holdFirstQuoteAnswer;
       return json({ id: 'https://payer.example/quotes/q1', walletAddress: PAYER, receiver: INCOMING, method: 'ilp', receiveAmount: { ...receive, assetCode: 'XRP', assetScale: 9 }, debitAmount: { value: (BigInt(receive.value) + 11_000_000n).toString(), assetCode: 'XRP', assetScale: 9 }, expiresAt: '2030-01-01T00:00:00Z' });
     }
     if (method === 'POST' && url === 'https://payer.example/outgoing-payments') {
+      if (headers.authorization !== `GNAP ${token}`) return json({ error: { code: 'invalid_token', description: 'the token is not known' } }, 401);
       paying = 1_116_670_000n;
       return json(outgoing(false));
     }
@@ -522,6 +530,94 @@ describe('the agent pays an order', () => {
     } finally {
       clock.mockRestore();
     }
+  });
+
+  describe('while another payment renews the token', () => {
+    const gate = (): { held: Promise<void>; release: () => void } => {
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => (release = resolve));
+      return { held, release };
+    };
+    const later = (): { clock: ReturnType<typeof vi.spyOn>; pass: (ms: number) => void } => {
+      const clock = vi.spyOn(Date, 'now');
+      let now = 1_800_000_000_000;
+      clock.mockImplementation(() => now);
+      return { clock, pass: (ms) => { now += ms; } };
+    };
+    const tick = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
+    it('keeps the grant when the refusal of the old token comes before the answer with the new one', async () => {
+      const quote = gate();
+      const rotation = gate();
+      const w = wallets({ expiresIn: 100, holdFirstQuote: quote.held, holdRotation: rotation.held });
+      const { clock, pass } = later();
+      try {
+        await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+        const first = new InterledgerLedger(settings, noWait).pay(order);
+        await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(1));
+
+        // The second payment's rotation is done at the wallet; its answer is still on the way.
+        pass(80_000);
+        const second = new InterledgerLedger(settings, noWait).pay(order);
+        await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1));
+
+        // Meanwhile the first payment is refused with the old token.
+        quote.release();
+        await tick();
+        await tick();
+        rotation.release();
+
+        await expect(first).rejects.toThrow(/quotes answered 401/);
+        await expect(second).resolves.toMatchObject({ validated: true });
+        expect(await new InterledgerLedger(settings, noWait).authorization(SEED)).toMatchObject({ approved: true });
+        expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+
+    it('sends the payment with the renewed token when the rotation fell between its quote and it', async () => {
+      const answer = gate();
+      const w = wallets({ expiresIn: 100, holdFirstQuoteAnswer: answer.held });
+      const { clock, pass } = later();
+      try {
+        await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+        // The wallet has taken the first payment's quote; the answer is on its way.
+        const first = new InterledgerLedger(settings, noWait).pay(order);
+        await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(1));
+
+        pass(80_000);
+        await expect(new InterledgerLedger(settings, noWait).pay(order)).resolves.toMatchObject({ validated: true });
+
+        answer.release();
+        await expect(first).resolves.toMatchObject({ validated: true });
+        expect(w.of('POST', 'https://payer.example/outgoing-payments').map((p) => p.headers.authorization)).toEqual([`GNAP ${TOKEN}-2`, `GNAP ${TOKEN}-2`]);
+      } finally {
+        clock.mockRestore();
+      }
+    });
+  });
+
+  it('rotates earlier for "approved" than a payment would, so the payment that follows need not', async () => {
+    // Sixty seconds left: a payment would not rotate yet, authorization() does.
+    const w = wallets({ expiresIn: 60 });
+    const ledger = new InterledgerLedger(settings, noWait);
+    await ledger.authorize(SEED, () => {});
+
+    expect(await ledger.authorization(SEED)).toMatchObject({ approved: true });
+    expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+    await ledger.pay(order);
+    expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+  });
+
+  it('approves a token that cannot be rotated for as long as it lasts, however short', async () => {
+    // Enforcing a lifetime here would never call such a wallet approved, and ask its owner without end.
+    const w = wallets({ expiresIn: 60, noManage: true });
+    const ledger = new InterledgerLedger(settings, noWait);
+    await ledger.authorize(SEED, () => {});
+
+    expect(await ledger.authorization(SEED)).toMatchObject({ approved: true });
+    expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
   });
 
   it('calls a grant approved only while its token outlasts the payment that follows', async () => {

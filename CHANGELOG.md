@@ -37,8 +37,10 @@
   took and that was not seen to arrive carries `unconfirmed: true` and the outgoing payment's id in
   its result, also when it merely did not arrive in time, and the runner, `record` and the MCP tools
   say "not confirmed" for it instead of "failed".
-- A 401 for a token another payment has renewed meanwhile no longer forgets the renewed grant, and
-  "approved" is only answered while the token lasts a minute longer than a payment needs.
+- A 401 for a token another payment has renewed, or is renewing, no longer forgets the renewed
+  grant, and each request of a payment goes out with the grant's token of that moment.
+  `authorization()` rotates a minute earlier than a payment would, so the payment after an
+  "approved" need not; a token that cannot be rotated is approved for as long as it lasts.
 - A grant is kept by what was asked (paying wallet, client, key, limit). One whose token the wallet no
   longer knows (401) is forgotten; a token is rotated once however many payments need it; and a caller
   that does not wait gets the new place to approve when the wallet will not renew it.

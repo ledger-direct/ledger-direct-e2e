@@ -117,8 +117,11 @@ const DELIVERY_WAIT_MS = 90_000;
 /** A token this close to its end is rotated before it is used. */
 const ROTATE_BEFORE_MS = 30_000;
 /**
- * How much longer than that a token must last for "approved" to be the answer: the payment
- * that follows the answer then finds a token it need not rotate, and never waits for the owner.
+ * How much earlier than that authorization() rotates: the payment that follows its "approved"
+ * then finds a token it need not rotate, and does not end up waiting for the owner. An effort,
+ * not a promise: a token that cannot be rotated, or a wallet whose tokens live shorter than
+ * this, is approved for as long as the token lasts. Asking for more would never call such a
+ * wallet approved and ask its owner without end.
  */
 const APPROVED_FOR_MS = 60_000;
 
@@ -278,17 +281,16 @@ export class InterledgerLedger implements Ledger {
 
     const granted = await this.usable(request.seed, (line) => console.error(line));
     const client = this.clientFor(request.seed);
-    // The token these two requests go out with. Another payment may rotate the grant's
-    // meanwhile; what the wallet then says of this one says nothing of the new one.
-    const token = granted.token;
+    // Each request goes out with the grant's token of that moment: another payment may rotate
+    // it between the two. `used` is the one the last request carried.
+    let used = granted.token;
     let payment: OutgoingPayment;
     try {
-      const quote = await client.createQuote(granted.wallet, token, request.to, receive);
-      payment = await client.createOutgoingPayment(granted.wallet, token, quote.id);
+      const quote = await client.createQuote(granted.wallet, used, request.to, receive);
+      used = granted.token;
+      payment = await client.createOutgoingPayment(granted.wallet, used, quote.id);
     } catch (error) {
-      // A token the wallet no longer knows pays nothing again: the next payment asks the owner.
-      // Nothing is sent a second time here; whoever called decides that.
-      if (isUnauthorized(error) && grants.get(this.grantId())?.grant?.token === token) grants.delete(this.grantId());
+      if (isUnauthorized(error)) await this.forgetIfStill(used);
       throw error;
     }
 
@@ -347,6 +349,20 @@ export class InterledgerLedger implements Ledger {
 
   async close(): Promise<void> {
     // Nothing is held open. The grant stays for the process: the next ledger of it pays under the same approval.
+  }
+
+  /**
+   * A token the wallet no longer knows pays nothing again: the grant is forgotten and the next
+   * payment asks the owner. Unless the token was only replaced: a rotation by another payment
+   * ends the old token at the wallet before its answer is here, so one under way is waited for,
+   * and the grant goes only if it still holds the refused token. Nothing is sent a second time
+   * here; whoever called decides that.
+   */
+  private async forgetIfStill(refused: AccessToken): Promise<void> {
+    const id = this.grantId();
+    const cached = grants.get(id);
+    await cached?.rotating?.catch(() => undefined);
+    if (cached !== undefined && grants.get(id) === cached && cached.grant?.token === refused) grants.delete(id);
   }
 
   private clientFor(seed: string): OpenPaymentsClient {
