@@ -461,10 +461,12 @@ export class InterledgerLedger implements Ledger {
    * and take a grant for dead that has just been renewed. False when the wallet refused:
    * the grant is forgotten, and the owner has to be asked again.
    *
-   * A renewal the wallet gives says the grant lives: a revoked grant is not renewed. So a
-   * grant that a refusal of its old token forgot meanwhile (forgetIfStill) is kept again,
-   * unless a newer request has taken its place: one that waits for the owner, or one that
-   * ended badly and has not been told yet.
+   * A renewal the wallet gives says the grant lives: a revoked grant is not renewed (RFC 9635
+   * §5.4 asks the authorization server to disable rotation of a revoked grant's tokens; Dassie
+   * 0.4.5 refuses a revoked token and a grant no longer approved, and renews an expired token
+   * of an approved grant). So a grant that a refusal of its old token forgot meanwhile
+   * (forgetIfStill) is kept again, unless a newer request has taken its place: one that
+   * waits for the owner, or one that ended badly and has not been told yet.
    */
   private async renewed(seed: string, request: GrantRequest, granted: Granted, before = ROTATE_BEFORE_MS): Promise<boolean> {
     if (request.rotating === undefined) {
