@@ -5,7 +5,7 @@ import { GuardedLedger, SpendGuard } from '../src/chains/spend.js';
 import { fromScale, OpenPaymentsClient, parseGrantAnswer, targetUri, toScale } from '../src/chains/interledger/client.js';
 import { consentLinks, incomingPaymentId, InterledgerLedger, interledgerSettings, type InterledgerSettings, resetInterledgerGrants } from '../src/chains/interledger/ledger.js';
 import { contentDigest, privateKeyOf, signatureBase, signatureParams, signedHeaders } from '../src/chains/interledger/signature.js';
-import { describeUnvalidated, type Ledger } from '../src/chains/chain.js';
+import { describeUnvalidated, type Ledger, type PaymentResult } from '../src/chains/chain.js';
 import type { Driver } from '../src/drivers/driver.js';
 import { readPaymentPage } from '../src/drivers/page.js';
 import { isPlainHttpsUrl } from '../src/drivers/shopware.js';
@@ -595,6 +595,110 @@ describe('the agent pays an order', () => {
       } finally {
         clock.mockRestore();
       }
+    });
+
+    describe('when a refusal of the old token forgot the grant just before the renewal', () => {
+      /**
+       * A payment takes the grant from the store and starts the renewal one microtask later.
+       * The test widens that gap: it holds the next renewal until `release`, and fails
+       * loudly if there is no renewed() to hold.
+       */
+      const holdNextRenewal = () => {
+        const proto = InterledgerLedger.prototype as unknown as { renewed(...args: unknown[]): Promise<boolean> };
+        const renewed = proto.renewed;
+        const hold = gate();
+        const spy = vi.spyOn(proto, 'renewed').mockImplementationOnce(async function (this: unknown, ...args: unknown[]) {
+          await hold.held;
+          return renewed.apply(this, args);
+        });
+        return { spy, release: hold.release };
+      };
+
+      /**
+       * The first payment's quote is refused while the second payment holds the grant and is
+       * about to renew it. The wallet let the token lapse a little earlier than the harness
+       * reckoned: the resource server refuses it, the authorization server still renews it.
+       * `between` runs after the refusal and before the renewal. Answers the second payment.
+       */
+      const refusedThenRenewed = async (w: ReturnType<typeof wallets>, quote: { release: () => void }, pass: (ms: number) => void, between: () => Promise<void>): Promise<PaymentResult> => {
+        await new InterledgerLedger(settings, noWait).authorize(SEED, () => {});
+        const first = new InterledgerLedger(settings, noWait).pay(order);
+        await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/quotes')).toHaveLength(1));
+
+        const renewal = holdNextRenewal();
+        try {
+          pass(80_000);
+          const second = new InterledgerLedger(settings, noWait).pay(order);
+          await vi.waitFor(() => expect(renewal.spy).toHaveBeenCalledTimes(1));
+
+          w.options.tokenRevoked = true;
+          quote.release();
+          await expect(first).rejects.toThrow(/quotes answered 401/);
+          w.options.tokenRevoked = false;
+          // Nothing was being renewed when the first payment was refused: the grant is forgotten.
+          expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(0);
+
+          await between();
+          renewal.release();
+          const paid = await second;
+          expect(w.of('POST', 'https://payer.example/gnap/token/t1')).toHaveLength(1);
+          return paid;
+        } finally {
+          renewal.spy.mockRestore();
+        }
+      };
+
+      it('keeps the grant the wallet renewed: the next payment does not ask the owner', async () => {
+        const quote = gate();
+        const w = wallets({ expiresIn: 100, holdFirstQuote: quote.held });
+        const { clock, pass } = later();
+        try {
+          await expect(refusedThenRenewed(w, quote, pass, async () => {})).resolves.toMatchObject({ validated: true });
+
+          expect(await new InterledgerLedger(settings, noWait).authorization(SEED)).toMatchObject({ approved: true });
+          expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(1);
+        } finally {
+          clock.mockRestore();
+        }
+      });
+
+      it('does not put it in place of a newer request that waits for the owner', async () => {
+        const quote = gate();
+        const w = wallets({ expiresIn: 100, holdFirstQuote: quote.held });
+        const { clock, pass } = later();
+        try {
+          const waiting = new InterledgerLedger(settings, () => new Promise<void>(() => {}));
+          await expect(refusedThenRenewed(w, quote, pass, async () => {
+            expect(await waiting.authorization(SEED)).toMatchObject({ approved: false });
+          })).resolves.toMatchObject({ validated: true });
+
+          expect(await waiting.authorization(SEED)).toMatchObject({ approved: false, approveAt: ['https://127.0.0.1:9443/consent/g1?key=k1'] });
+          expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+        } finally {
+          clock.mockRestore();
+        }
+      });
+
+      it('does not put it in place of a newer request the owner refused: the refusal is told', async () => {
+        const quote = gate();
+        const w = wallets({ expiresIn: 100, holdFirstQuote: quote.held });
+        const { clock, pass } = later();
+        try {
+          const ledger = new InterledgerLedger(settings, noWait);
+          await expect(refusedThenRenewed(w, quote, pass, async () => {
+            w.options.deny = true;
+            expect(await ledger.authorization(SEED)).toMatchObject({ approved: false });
+            await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/gnap/continue/g1')).toHaveLength(3));
+            // The refusal is in once the answer has been read: a few turns of the event loop.
+            for (let i = 0; i < 3; i += 1) await tick();
+          })).resolves.toMatchObject({ validated: true });
+
+          await expect(ledger.authorization(SEED)).rejects.toThrow(/user_denied/);
+          expect(w.of('POST', 'https://payer.example/gnap')).toHaveLength(2);
+        } finally {
+          clock.mockRestore();
+        }
+      });
     });
   });
 

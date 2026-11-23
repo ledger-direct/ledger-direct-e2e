@@ -355,8 +355,9 @@ export class InterledgerLedger implements Ledger {
    * A token the wallet no longer knows pays nothing again: the grant is forgotten and the next
    * payment asks the owner. Unless the token was only replaced: a rotation by another payment
    * ends the old token at the wallet before its answer is here, so one under way is waited for,
-   * and the grant goes only if it still holds the refused token. Nothing is sent a second time
-   * here; whoever called decides that.
+   * and the grant goes only if it still holds the refused token. A payment that took the grant
+   * just before may still renew it; then the grant comes back (renewed). Nothing is sent a
+   * second time here; whoever called decides that.
    */
   private async forgetIfStill(refused: AccessToken): Promise<void> {
     const id = this.grantId();
@@ -459,15 +460,22 @@ export class InterledgerLedger implements Ledger {
    * ends the old token with the new one, so a second rotation beside the first would fail
    * and take a grant for dead that has just been renewed. False when the wallet refused:
    * the grant is forgotten, and the owner has to be asked again.
+   *
+   * A renewal the wallet gives says the grant lives: a revoked grant is not renewed. So a
+   * grant that a refusal of its old token forgot meanwhile (forgetIfStill) is kept again,
+   * unless a newer request has taken its place: one that waits for the owner, or one that
+   * ended badly and has not been told yet.
    */
   private async renewed(seed: string, request: GrantRequest, granted: Granted, before = ROTATE_BEFORE_MS): Promise<boolean> {
     if (request.rotating === undefined) {
       const { expiresAt, manage } = granted.token;
       if (expiresAt === undefined || expiresAt - Date.now() > before || !manage) return true;
+      const id = this.grantId();
       request.rotating = this.clientFor(seed)
         .rotate(granted.token)
         .then((token) => {
           granted.token = token;
+          if (!grants.has(id) && !failures.has(id)) grants.set(id, request);
         })
         .finally(() => {
           request.rotating = undefined;
