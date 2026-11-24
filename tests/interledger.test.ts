@@ -687,10 +687,20 @@ describe('the agent pays an order', () => {
           const ledger = new InterledgerLedger(settings, noWait);
           await expect(refusedThenRenewed(w, quote, pass, async () => {
             w.options.deny = true;
-            expect(await ledger.authorization(SEED)).toMatchObject({ approved: false });
-            await vi.waitFor(() => expect(w.of('POST', 'https://payer.example/gnap/continue/g1')).toHaveLength(3));
-            // The refusal is in once the answer has been read: a few turns of the event loop.
-            for (let i = 0; i < 3; i += 1) await tick();
+            // The newer request itself, to wait for its refusal rather than for turns of the event loop.
+            const proto = InterledgerLedger.prototype as unknown as { request(...args: unknown[]): { granted: Promise<unknown> } };
+            const asked = vi.spyOn(proto, 'request');
+            let refused: Promise<unknown>;
+            try {
+              expect(await ledger.authorization(SEED)).toMatchObject({ approved: false });
+              expect(asked).toHaveBeenCalledTimes(1);
+              refused = asked.mock.results[0]!.value.granted;
+            } finally {
+              asked.mockRestore();
+            }
+            // request() hooked the store's handler onto the refusal first, so it has run when this one does:
+            // the refusal is recorded before the renewal goes on.
+            await expect(refused).rejects.toThrow(/user_denied/);
           })).resolves.toMatchObject({ validated: true });
 
           await expect(ledger.authorization(SEED)).rejects.toThrow(/user_denied/);
