@@ -56,6 +56,11 @@
 - PS-12 takes only a number or a decimal for `amount_requested`; `{ "value": null }` no longer passes.
 - `ld-e2e record`: a grant the owner refuses or lets lapse ends the recording like any other failure,
   in the log and in `recording.json`.
+- `ld-e2e record --asset EUR|USD|DSUSD` (MCP `shop_record_purchase` too) with `--chain INTERLEDGER`: the
+  plugins' walk had the payment methods, the harness refused the asset. On Interledger only the assets
+  with an Interledger payment method are taken (XRP, EUR, USD, DSUSD); EUR, USD and DSUSD on a ledger are
+  refused before anything starts. First recording: the Interledger test wallet as the merchant, EUR,
+  Shopware order 10213.
 - `ld-e2e record --color-scheme light|dark` (MCP: `colorScheme`), `light` by default: what the pages see as
   `prefers-color-scheme`. Headless Chrome took the system's before, so a Mac in dark mode filmed a dark payment
   page. The default folder name includes the scheme; `recording.json` records it always.
