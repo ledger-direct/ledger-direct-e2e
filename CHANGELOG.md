@@ -41,6 +41,9 @@
   grant, and each request of a payment goes out with the grant's token of that moment.
   `authorization()` rotates a minute earlier than a payment would, so the payment after an
   "approved" need not; a token that cannot be rotated is approved for as long as it lasts.
+- A grant forgotten on a 401 comes back when a payment that took it just before renews its token:
+  a renewal the wallet gives says the grant lives. It does not take the place of a newer request
+  that waits for the owner, or of one that ended badly before anybody was told.
 - A grant is kept by what was asked (paying wallet, client, key, limit). One whose token the wallet no
   longer knows (401) is forgotten; a token is rotated once however many payments need it; and a caller
   that does not wait gets the new place to approve when the wallet will not renew it.
