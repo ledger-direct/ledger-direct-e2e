@@ -209,6 +209,13 @@ interface WalletOptions {
   refuseRequest?: boolean;
   /** The continuation answers this status instead of a decision. */
   continueStatus?: number;
+  /** The `wait` the wallet names for a continuation; 5 by default. */
+  wait?: number;
+  /**
+   * The first continuations are refused as Rafiki refuses one whose fetch of the client's key set
+   * failed (400 invalid_client); Infinity for all. The request still waits.
+   */
+  continueRefusals?: number;
   /** The resource server no longer knows the token. */
   tokenRevoked?: boolean;
   /** Somebody else fills the incoming payment; this payment sends nothing. */
@@ -237,8 +244,9 @@ function wallets(options: WalletOptions = {}) {
   let rotations = 0;
   let unreadable = options.unreadable ?? 0;
   let quotes = 0;
+  let refusals = options.continueRefusals ?? 0;
   const json = (body: unknown, status = 200): Response => new Response(status === 204 ? null : JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-  const pending = { continue: { access_token: { value: 'continue-token' }, uri: 'https://payer.example/gnap/continue/g1', wait: 5 } };
+  const pending = { continue: { access_token: { value: 'continue-token' }, uri: 'https://payer.example/gnap/continue/g1', wait: options.wait ?? 5 } };
 
   const fetchStub = vi.fn(async (input: string | URL, init: RequestInit = {}): Promise<Response> => {
     const url = String(input);
@@ -261,6 +269,10 @@ function wallets(options: WalletOptions = {}) {
       return json({ interact: { redirect: 'https://payer.example/gnap/interact/g1/k1', finish: 'nonce' }, ...pending });
     }
     if (method === 'POST' && url === 'https://payer.example/gnap/continue/g1') {
+      if (refusals > 0) {
+        refusals -= 1;
+        return json({ error: { code: 'invalid_client', description: 'could not determine client' } }, 400);
+      }
       polls += 1;
       if (options.continueStatus) return json({ error: { code: 'unavailable', description: 'try later' } }, options.continueStatus);
       if (options.deny) return json({ error: { code: 'user_denied', description: 'the owner refused\u0007 the request' } }, 403);
@@ -440,6 +452,33 @@ describe('the agent pays an order', () => {
     const w = wallets({ continueStatus: 503 });
 
     await expect(new InterledgerLedger(settings, noWait).authorize(SEED, () => {})).rejects.toThrow(/the grant was not given: .*answered 503/);
+    expect(w.of('DELETE', 'https://payer.example/gnap/continue/g1')).toHaveLength(1);
+  });
+
+  it('waits at least five seconds between continuations, and longer where the wallet asks for it', async () => {
+    for (const [wait, slept] of [[1, 5000], [7, 7000]] as const) {
+      resetInterledgerGrants();
+      wallets({ wait });
+      const sleeps: number[] = [];
+      await new InterledgerLedger(settings, async (ms) => { sleeps.push(ms); }).authorize(SEED, () => {});
+      expect(sleeps).toEqual([slept, slept]);
+    }
+  });
+
+  it('asks again when the wallet could not tell who continues, and is given the grant', async () => {
+    const w = wallets({ continueRefusals: 3 });
+
+    await expect(new InterledgerLedger(settings, noWait).authorize(SEED, () => {})).resolves.toBeUndefined();
+    // Three refused, then the two polls of a wallet that approves on the second.
+    expect(w.of('POST', 'https://payer.example/gnap/continue/g1')).toHaveLength(5);
+    expect(w.of('DELETE', 'https://payer.example/gnap/continue/g1')).toHaveLength(0);
+  });
+
+  it('gives up after three such refusals in a row more, and withdraws the request, which still waits', async () => {
+    const w = wallets({ continueRefusals: Infinity });
+
+    await expect(new InterledgerLedger(settings, noWait).authorize(SEED, () => {})).rejects.toThrow(/the grant was not given: .*answered 400 \(invalid_client: could not determine client\)/);
+    expect(w.of('POST', 'https://payer.example/gnap/continue/g1')).toHaveLength(4);
     expect(w.of('DELETE', 'https://payer.example/gnap/continue/g1')).toHaveLength(1);
   });
 

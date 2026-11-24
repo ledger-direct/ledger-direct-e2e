@@ -51,6 +51,12 @@
   path of at least `/`), whatever form the wallet named it in.
 - A waiting request is withdrawn when the wallet answers with a server error, not only when the
   harness gives up; a request refused at once is told to the caller who asked, and not again.
+- While the owner decides, the harness asks at most every five seconds, however short a `wait` the
+  wallet names (Rafiki: one second), and asks again up to three times when a continuation fails without
+  the request being over: a server error, a timeout, or `invalid_client`, which Rafiki answers whenever
+  one fetch of the client's key set fails. A wait that ends this way withdraws the request. Before, one
+  such answer ended the run and left the request in the owner's wallet (seen against the Interledger
+  test wallet on 24.11.).
 - MCP: `shop_place_order` takes `EUR`, `USD` and `DSUSD`, the assets an Interledger wallet may hold.
 - Shopware driver: the record of an incoming payment is read where its URL names a port.
 - PS-12 takes only a number or a decimal for `amount_requested`; `{ "value": null }` no longer passes.
