@@ -1,12 +1,16 @@
 import { join } from 'node:path';
 import type { ChainId } from '../chains/chain.js';
+import { INTERLEDGER_ASSETS } from '../chains/interledger/assets.js';
 
 /**
  * What `ld-e2e record` and the MCP tool `shop_record_purchase` take, checked before anything is
  * started: a browser, an order or a payment are only worth starting once the arguments are right.
  */
-export const RECORD_ASSETS = ['XRP', 'RLUSD', 'USDC', 'XAH'] as const;
+export const RECORD_ASSETS = ['XRP', 'RLUSD', 'USDC', 'XAH', 'EUR', 'USD', 'DSUSD'] as const;
 export type RecordAsset = (typeof RECORD_ASSETS)[number];
+
+/** Assets only an Open Payments wallet holds here: a recording of one pays over Interledger. */
+const OPEN_PAYMENTS_ONLY: readonly RecordAsset[] = ['EUR', 'USD', 'DSUSD'];
 
 /**
  * Who buys. `guest`: the walk fills the address form, on camera. `customer`: an account made for
@@ -67,10 +71,17 @@ export function parseAsset(value: string): RecordAsset {
 
 /**
  * The chain a recording pays on: Xahau for XAH, which exists nowhere else (a try shop sends XAH to
- * its own Xahau account), else the one asked for.
+ * its own Xahau account), else the one asked for. On Interledger the asset is one the plugins have a
+ * payment method for (the merchant's wallet address holds it); EUR, USD and DSUSD exist only there.
  */
 export function recordChain(asset: RecordAsset, chain: ChainId): ChainId {
-  return asset === 'XAH' ? 'XAHAU' : chain;
+  if (asset === 'XAH') return 'XAHAU';
+  if (chain === 'INTERLEDGER') {
+    if (!INTERLEDGER_ASSETS.includes(asset)) throw new Error(`--asset: ${asset} has no Interledger payment method; one of ${INTERLEDGER_ASSETS.join(', ')}`);
+    return chain;
+  }
+  if (OPEN_PAYMENTS_ONLY.includes(asset)) throw new Error(`--asset: ${asset} is paid over Interledger only; add --chain INTERLEDGER`);
+  return chain;
 }
 
 export function parseStart(value: string): RecordStart {

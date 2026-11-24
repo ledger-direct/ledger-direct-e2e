@@ -19,15 +19,29 @@ describe('record arguments', () => {
     expect(() => parseSize('100x100')).toThrow(/320…3840/);
   });
 
-  it('takes the four assets of the try shops, in any case', () => {
+  it('takes the four assets of the try shops and the three of Open Payments wallets, in any case', () => {
     expect(parseAsset('rlusd')).toBe('RLUSD');
     expect(parseAsset('XAH')).toBe('XAH');
-    expect(() => parseAsset('XLM')).toThrow(/XRP, RLUSD, USDC, XAH/);
+    expect(parseAsset('eur')).toBe('EUR');
+    expect(parseAsset('DSUSD')).toBe('DSUSD');
+    expect(() => parseAsset('XLM')).toThrow(/XRP, RLUSD, USDC, XAH, EUR, USD, DSUSD/);
   });
 
   it('pays XAH on Xahau and everything else on the chain asked for', () => {
     expect(recordChain('XAH', 'XRPL')).toBe('XAHAU');
     expect(recordChain('RLUSD', 'XRPL')).toBe('XRPL');
+  });
+
+  it('pays over Interledger in an asset the plugins have an Interledger payment method for', () => {
+    for (const asset of ['XRP', 'EUR', 'USD', 'DSUSD'] as const) expect(recordChain(asset, 'INTERLEDGER')).toBe('INTERLEDGER');
+    expect(() => recordChain('RLUSD', 'INTERLEDGER')).toThrow(/RLUSD has no Interledger payment method; one of XRP, EUR, USD, DSUSD/);
+    expect(() => recordChain('USDC', 'INTERLEDGER')).toThrow(/no Interledger payment method/);
+  });
+
+  it('refuses EUR, USD and DSUSD on a ledger: only an Open Payments wallet holds them', () => {
+    for (const chain of ['XRPL', 'STELLAR'] as const) {
+      for (const asset of ['EUR', 'USD', 'DSUSD'] as const) expect(() => recordChain(asset, chain)).toThrow(/paid over Interledger only/);
+    }
   });
 
   it('names the colour scheme the pages see, light or dark', () => {
