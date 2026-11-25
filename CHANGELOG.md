@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- `ld-e2e record --asset XLM` films a purchase in XLM on Stellar, so far in Shopware, whose Stellar
+  support is a preview. XLM pays on Stellar without `--chain`, as XAH pays on Xahau. A try stack still
+  refuses Stellar, now in the MCP tool `shop_record_purchase` too; the README ("Recordings") says how
+  to point a recording at a shop with Stellar switched on.
 - `--chain INTERLEDGER`: the harness pays as an agent over Open Payments, from a wallet whose owner
   approved a spending limit. Once per process it asks the paying wallet for a grant (quotes, and outgoing
   payments up to `LD_E2E_INTERLEDGER_GRANT_LIMIT`), prints where the owner decides and waits; afterwards

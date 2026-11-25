@@ -20,7 +20,7 @@ import { mergeIntoBody, readPrBody, writePrBody } from './report/pr.js';
 import { markdown, writeReport } from './report/report.js';
 import { resolveCaseIds, runCases } from './runner/run.js';
 import { HARNESS_VERSION } from './version.js';
-import { RECORD_ASSETS, RECORD_BUYERS, RECORD_COLOR_SCHEMES, RECORD_DEFAULTS, defaultOutDir, parseAsset, parseBuyer, parseColorScheme, parseSize, parseStart, recordChain } from './record/options.js';
+import { RECORD_ASSETS, RECORD_BUYERS, RECORD_COLOR_SCHEMES, RECORD_DEFAULTS, defaultOutDir, parseAsset, parseBuyer, parseColorScheme, parseSize, parseStart, recordChain, assertTryChain } from './record/options.js';
 
 const program = new Command();
 program
@@ -342,8 +342,7 @@ program
     const asset = parseAsset(opts.asset);
     const buyer = parseBuyer(opts.as);
     const payOn = recordChain(asset, chain());
-    // The try stacks take XRP, RLUSD and USDC on the XRP Ledger and XAH on Xahau.
-    if (opts.try && payOn === 'STELLAR') throw new Error('--try: the try stacks run on the XRP Ledger and Xahau testnets only');
+    assertTryChain(opts.try, payOn);
     const start = parseStart(opts.start);
     const size = parseSize(opts.size);
     const colorScheme = parseColorScheme(opts.colorScheme);

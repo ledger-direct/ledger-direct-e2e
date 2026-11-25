@@ -6,7 +6,7 @@ import { INTERLEDGER_ASSETS } from '../chains/interledger/assets.js';
  * What `ld-e2e record` and the MCP tool `shop_record_purchase` take, checked before anything is
  * started: a browser, an order or a payment are only worth starting once the arguments are right.
  */
-export const RECORD_ASSETS = ['XRP', 'RLUSD', 'USDC', 'XAH', 'EUR', 'USD', 'DSUSD'] as const;
+export const RECORD_ASSETS = ['XRP', 'RLUSD', 'USDC', 'XAH', 'XLM', 'EUR', 'USD', 'DSUSD'] as const;
 export type RecordAsset = (typeof RECORD_ASSETS)[number];
 
 /** Assets only an Open Payments wallet holds here: a recording of one pays over Interledger. */
@@ -70,18 +70,30 @@ export function parseAsset(value: string): RecordAsset {
 }
 
 /**
- * The chain a recording pays on: Xahau for XAH, which exists nowhere else (a try shop sends XAH to
- * its own Xahau account), else the one asked for. On Interledger the asset is one the plugins have a
+ * The chain a recording pays on: Xahau for XAH and Stellar for XLM, which exist nowhere else (a try
+ * shop sends XAH to its own Xahau account), else the one asked for. On Interledger the asset is one the plugins have a
  * payment method for (the merchant's wallet address holds it); EUR, USD and DSUSD exist only there.
  */
 export function recordChain(asset: RecordAsset, chain: ChainId): ChainId {
   if (asset === 'XAH') return 'XAHAU';
+  if (asset === 'XLM') return 'STELLAR';
   if (chain === 'INTERLEDGER') {
     if (!INTERLEDGER_ASSETS.includes(asset)) throw new Error(`--asset: ${asset} has no Interledger payment method; one of ${INTERLEDGER_ASSETS.join(', ')}`);
     return chain;
   }
   if (OPEN_PAYMENTS_ONLY.includes(asset)) throw new Error(`--asset: ${asset} is paid over Interledger only; add --chain INTERLEDGER`);
   return chain;
+}
+
+/**
+ * The try stacks take XRP, RLUSD and USDC on the XRP Ledger and XAH on Xahau. Shopware's has Stellar
+ * as a preview that every start of the stack switches off, so a recording on Stellar names its shop
+ * the way a dev shop is named, after `shop reset` has switched Stellar on there.
+ */
+export function assertTryChain(useTry: boolean, chain: ChainId): void {
+  if (useTry && chain === 'STELLAR') {
+    throw new Error('try: the try stacks run on the XRP Ledger and Xahau testnets only. To record on Stellar, switch it on in a shop with `ld-e2e --chain STELLAR shop reset --account G…` and name that shop by base URL, container and access key (README, "Recordings")');
+  }
 }
 
 export function parseStart(value: string): RecordStart {
