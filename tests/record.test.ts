@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { chromePath } from '../src/record/browser.js';
 import { buildManifest, relative, type RecordFacts } from '../src/record/manifest.js';
-import { defaultOutDir, orderedBy, parseAsset, parseColorScheme, parseSize, parseStart, recordChain, stamp } from '../src/record/options.js';
+import { assertTryChain, defaultOutDir, orderedBy, parseAsset, parseColorScheme, parseSize, parseStart, recordChain, stamp } from '../src/record/options.js';
 import { findWalkModule, walkPath } from '../src/record/walk.js';
 import { HARNESS_VERSION } from '../src/version.js';
 
@@ -19,16 +19,19 @@ describe('record arguments', () => {
     expect(() => parseSize('100x100')).toThrow(/320…3840/);
   });
 
-  it('takes the four assets of the try shops and the three of Open Payments wallets, in any case', () => {
+  it('takes the four assets of the try shops, XLM and the three of Open Payments wallets, in any case', () => {
     expect(parseAsset('rlusd')).toBe('RLUSD');
     expect(parseAsset('XAH')).toBe('XAH');
+    expect(parseAsset('xlm')).toBe('XLM');
     expect(parseAsset('eur')).toBe('EUR');
     expect(parseAsset('DSUSD')).toBe('DSUSD');
-    expect(() => parseAsset('XLM')).toThrow(/XRP, RLUSD, USDC, XAH, EUR, USD, DSUSD/);
+    expect(() => parseAsset('EURC')).toThrow(/XRP, RLUSD, USDC, XAH, XLM, EUR, USD, DSUSD/);
   });
 
-  it('pays XAH on Xahau and everything else on the chain asked for', () => {
+  it('pays XAH on Xahau, XLM on Stellar and everything else on the chain asked for', () => {
     expect(recordChain('XAH', 'XRPL')).toBe('XAHAU');
+    expect(recordChain('XLM', 'XRPL')).toBe('STELLAR');
+    expect(recordChain('XLM', 'STELLAR')).toBe('STELLAR');
     expect(recordChain('RLUSD', 'XRPL')).toBe('XRPL');
   });
 
@@ -36,6 +39,12 @@ describe('record arguments', () => {
     for (const asset of ['XRP', 'EUR', 'USD', 'DSUSD'] as const) expect(recordChain(asset, 'INTERLEDGER')).toBe('INTERLEDGER');
     expect(() => recordChain('RLUSD', 'INTERLEDGER')).toThrow(/RLUSD has no Interledger payment method; one of XRP, EUR, USD, DSUSD/);
     expect(() => recordChain('USDC', 'INTERLEDGER')).toThrow(/no Interledger payment method/);
+  });
+
+  it('refuses a try stack on Stellar, where the stacks start with it switched off, and takes it elsewhere', () => {
+    expect(() => assertTryChain(true, recordChain('XLM', 'XRPL'))).toThrow(/try stacks run on the XRP Ledger and Xahau testnets only/);
+    expect(() => assertTryChain(false, 'STELLAR')).not.toThrow();
+    for (const chain of ['XRPL', 'XAHAU', 'INTERLEDGER'] as const) expect(() => assertTryChain(true, chain)).not.toThrow();
   });
 
   it('refuses EUR, USD and DSUSD on a ledger: only an Open Payments wallet holds them', () => {

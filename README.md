@@ -385,11 +385,13 @@ ld-e2e record --target shopware --try --start shop --size 1080x1080     # the wh
 ld-e2e record --target prestashop --try --asset XRP --out ~/videos/ps   # any target, any try asset
 ld-e2e --chain INTERLEDGER record --target shopware --asset XRP --start shop --as customer \
   --product SWDEMO10006 --compose-dir <plugin>/dev/try                  # a dev shop: cart, checkout, an agent pays, confirmation
+ld-e2e --chain STELLAR shop reset --target shopware --account G...      # Stellar on in a Shopware shop (preview), then:
+ld-e2e record --target shopware --asset XLM --compose-dir <plugin>/dev/try   # XLM on Stellar, the shop named as below
 ```
 
 | Option | Default | |
 |---|---|---|
-| `--asset` | `RLUSD` | `XRP`, `RLUSD`, `USDC`, `XAH` (XAH pays on Xahau, without `--chain`) |
+| `--asset` | `RLUSD` | `XRP`, `RLUSD`, `USDC`, `XAH`, `XLM` (XAH pays on Xahau and XLM on Stellar, without `--chain`) |
 | `--start` | `payment` | `payment`: filming starts on the payment page. `shop`: on the home page, the whole purchase |
 | `--as` | `guest` | `guest`: the walk fills the address form, on camera. `customer`: an account made for the recording is logged in off camera, so the checkout goes from the cart straight to the confirm page |
 | `--product` | the walk's own article | the product number of the article the walk buys in the browser, for a shop without the try catalogue |
@@ -407,6 +409,16 @@ the order confirmation and stops about three seconds later. With `--start shop` 
 the home page and the plugin's own browser walk goes to the payment page the way a visitor does;
 the rest is the same. Nothing on the page is changed for the film, and the page polls on its own
 schedule (every 8 seconds), so the waiting stays in the raw film.
+
+**XLM on Stellar.** Only the Shopware plugin takes Stellar, as a preview, and its try stack starts
+with Stellar switched off, on every start. So `--try` stays on the XRP Ledger and Xahau, and a
+recording in XLM names its shop the way a dev shop is named: `LD_E2E_SHOPWARE_BASE_URL`,
+`_CONTAINER`, `_ACCESS_KEY`, `_ADMIN_USER`, `_ADMIN_PASSWORD` and `_TEST_PRODUCT` (for a try stack
+the values its `compose.yaml` lists), and `--compose-dir` for the walk, which knows XLM from
+ledger-direct-shopware6#97 on (an older one stops with "unknown asset xlm"). `shop reset` with `--chain
+STELLAR` switches Stellar on there and creates its payment methods; do not restart the stack between
+that and the recording. The receiving account is a fresh one (`ld-e2e --chain STELLAR wallet fresh`),
+not one another shop syncs: two shops on one account share its memo ids.
 
 **Who places the order.** A storefront shows its order confirmation only to the browser session
 that ordered; Shopware sends anyone else to the cart. So where the plugin has a walk, the browser
