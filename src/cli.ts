@@ -10,6 +10,7 @@ import { withClient } from './chains/xrpl/client.js';
 import { bookOffers, buy } from './chains/xrpl/dex.js';
 import { ensureTreasury, isAccountNotFound, type Stablecoin } from './chains/xrpl/ensure.js';
 import { XAHAU } from './chains/xrpl/profile.js';
+import { checkIssuers, judgeIssuers, warn } from './chains/xrpl/reset.js';
 import { balances as xrplBalances, faucet, requireTrustlines, setTrustlines, walletFromSeed } from './chains/xrpl/wallets.js';
 import { optionalAddress, redact, requireSeed } from './config.js';
 import { createDriver, isTarget, TARGETS } from './drivers/factory.js';
@@ -134,8 +135,17 @@ wallet
     for (const [name, value] of [['--xrp', minimums.xrp], ['--rlusd', minimums.tokens.RLUSD], ['--usdc', minimums.tokens.USDC]] as const) {
       if (!Number.isFinite(value) || value < 0) throw new Error(`${name}: "${value}" is not a non-negative number`);
     }
-    const result = await withClient((c) =>
-      ensureTreasury(minimums, {
+    const result = await withClient(async (c) => {
+      // Shortly after a testnet reset a stablecoin whose issuer is not back yet can be neither
+      // trusted nor bought: the treasury does without it and says so. Later it is an error.
+      const coins = Object.keys(minimums.tokens) as Stablecoin[];
+      const { withdrawn, stillMissing } = judgeIssuers(await checkIssuers(c, coins.map((code) => ({ code, issuer: TESTNET_ISSUED[code].issuer }))));
+      if (stillMissing.length > 0) throw new Error(stillMissing.map((a) => a.reason).join('; '));
+      for (const asset of withdrawn) {
+        warn(asset.reason);
+        delete minimums.tokens[asset.code as Stablecoin];
+      }
+      return ensureTreasury(minimums, {
         read: async () => {
           try {
             const b = await xrplBalances(c, w.classicAddress);
@@ -165,8 +175,8 @@ wallet
         buy: async (coin: Stablecoin, amount: string) => (await buy(c, w, coin, amount, opts.maxXrp)).result,
         pause: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
         log: (line) => process.stderr.write(line + '\n'),
-      }),
-    );
+      });
+    });
     out(result, () => {
       const fmt = (t: typeof result.after) => `XRP ${t.xrp}, RLUSD ${t.tokens.RLUSD ?? 0}, USDC ${t.tokens.USDC ?? 0}`;
       return result.actions.length === 0 ? `treasury above its minimums: ${fmt(result.after)}` : `treasury topped up (${result.actions.join('; ')}): ${fmt(result.before)} → ${fmt(result.after)}`;

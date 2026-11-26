@@ -1,5 +1,6 @@
 import { AccountSetAsfFlags, Client, Wallet } from 'xrpl';
-import type { AccountSetResult, Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from '../chain.js';
+import type { AccountSetResult, Balances, ChainAsset, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult, WithdrawnAsset } from '../chain.js';
+import { checkIssuers, judgeIssuers } from './reset.js';
 import { submitWithRetry } from './submit.js';
 import { parseXrplIncoming } from './incoming.js';
 import { pay } from './payments.js';
@@ -17,6 +18,8 @@ export class XrplLedger implements Ledger {
   readonly nativeAsset: string;
   private client?: Client;
   private connecting?: Promise<Client>;
+  /** Issued assets taken out after a testnet reset (withdrawMissingIssuers). */
+  private readonly withdrawn = new Set<string>();
 
   /**
    * @param funderSeed the treasury's seed, for a profile whose fresh accounts the treasury opens
@@ -57,13 +60,26 @@ export class XrplLedger implements Ledger {
   assets(): ChainAsset[] {
     return [
       { code: this.profile.nativeAsset, native: true },
-      ...Object.entries(this.profile.issued).map(([code, issued]) => ({ code, native: false, issuer: issued.issuer })),
+      ...Object.entries(this.issued()).map(([code, issued]) => ({ code, native: false, issuer: issued.issuer })),
     ];
+  }
+
+  /** The profile's issued assets without the withdrawn ones. */
+  private issued(): XrplProfile['issued'] {
+    return Object.fromEntries(Object.entries(this.profile.issued).filter(([code]) => !this.withdrawn.has(code)));
+  }
+
+  async withdrawMissingIssuers(): Promise<WithdrawnAsset[]> {
+    const issued = Object.entries(this.profile.issued).map(([code, asset]) => ({ code, issuer: asset.issuer }));
+    if (issued.length === 0) return [];
+    const judgement = judgeIssuers(await checkIssuers(await this.connect(), issued));
+    for (const asset of judgement.withdrawn) this.withdrawn.add(asset.code);
+    return judgement.withdrawn;
   }
 
   async createFresh(options: { trustlines?: boolean } = {}): Promise<FreshAccount> {
     const c = await this.connect();
-    const created = await createFresh(c, { ...options, funderSeed: this.funderSeed }, this.profile);
+    const created = await createFresh(c, { ...options, funderSeed: this.funderSeed }, { ...this.profile, issued: this.issued() });
     return { address: created.wallet.classicAddress, seed: created.wallet.seed!, trustlines: created.trustlines };
   }
 

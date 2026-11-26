@@ -1,5 +1,6 @@
 import { appliesTo, CASES, findCase } from '../cases/catalogue.js';
-import type { Ledger } from '../chains/chain.js';
+import type { Ledger, WithdrawnAsset } from '../chains/chain.js';
+import { warn } from '../chains/xrpl/reset.js';
 import { isAccountOf, treasurySeedVariable } from '../chains/index.js';
 import { spendGuard } from '../chains/spend.js';
 import { requireSeed } from '../config.js';
@@ -33,15 +34,23 @@ export async function runCases(options: RunOptions): Promise<Report> {
   const ledger = options.ledger;
   const startedAt = new Date().toISOString();
 
-  /** The skip result for a case that is not this platform's or this chain's, null for one that is (or an unknown id). */
-  const notApplicable = (id: string): CaseResult | null => {
+  /** Issued assets this run does without, shortly after a testnet reset; set by the preflight below. */
+  let withdrawn: WithdrawnAsset[] = [];
+
+  /**
+   * The skip result for a case that is not this platform's or this chain's, null for one that is
+   * (or an unknown id). Without `issued` the issued assets are not looked at: that needs the
+   * network (withdrawMissingIssuers), everything else does not.
+   */
+  const notApplicable = (id: string, { issued: checkIssued = true }: { issued?: boolean } = {}): CaseResult | null => {
     const spec = findCase(id);
     if (!spec) return null;
     const skip = (reason: string): CaseResult => ({ id, title: spec.title, target: options.driver.name, outcome: 'skip', reason, startedAt: new Date().toISOString(), durationMs: 0, states: [], evidence: [] });
     if (!appliesTo(spec, options.driver.name)) return skip(`not a case for ${options.driver.name} (${spec.targets?.join(', ') ?? ''} only)`);
     const issued = ledger.assets().filter((a) => !a.native).length;
-    if (spec.needsIssuedAssets !== undefined && issued < spec.needsIssuedAssets) {
-      return skip(`needs ${spec.needsIssuedAssets} issued assets on ${ledger.chain}, which has ${issued}`);
+    if (checkIssued && spec.needsIssuedAssets !== undefined && issued < spec.needsIssuedAssets) {
+      const why = withdrawn.length > 0 ? ` (withdrawn after a testnet reset: ${withdrawn.map((a) => a.code).join(', ')})` : '';
+      return skip(`needs ${spec.needsIssuedAssets} issued assets on ${ledger.chain}, which has ${issued}${why}`);
     }
     const driverMissing = (spec.needsDriver ?? []).filter((m) => typeof options.driver[m] !== 'function');
     if (driverMissing.length > 0) return skip(`the ${options.driver.name} driver cannot read ${driverMissing.join(', ')} yet (the plugin does not check the receiving account)`);
@@ -50,16 +59,22 @@ export async function runCases(options: RunOptions): Promise<Report> {
     return null;
   };
 
-  // Nothing of the selection is this platform's: no seed, no account, no configure — the shop
-  // is left exactly as it is, and the report says why each case did not run. An empty
-  // selection still goes through the setup below (a run that only puts the shop back).
-  const skippedAll = options.caseIds.length > 0 ? options.caseIds.map(notApplicable) : [];
-  if (skippedAll.length > 0 && skippedAll.every((r) => r !== null)) {
-    for (const r of skippedAll as CaseResult[]) options.log(`${r.id} ${r.title}: skipped, ${r.reason}`);
-    return { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount: options.receivingAccount ?? '', network: 'testnet', startedAt, results: skippedAll as CaseResult[], spending: spendGuard().summary() };
-  }
+  /**
+   * Nothing of the selection is to run: no seed, no account, no configure — the shop is left
+   * exactly as it is, and the report says why each case did not run. Null when something runs;
+   * an empty selection still goes through the setup below (a run that only puts the shop back).
+   */
+  const allSkipped = (results: (CaseResult | null)[]): Report | null => {
+    if (results.length === 0 || results.some((r) => r === null)) return null;
+    for (const r of results as CaseResult[]) options.log(`${r.id} ${r.title}: skipped, ${r.reason}`);
+    return { ...(withdrawn.length > 0 ? { withdrawn } : {}), tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount: options.receivingAccount ?? '', network: 'testnet', startedAt, results: results as CaseResult[], spending: spendGuard().summary() };
+  };
 
-  const payerSeed = requireSeed(treasurySeedVariable(ledger.chain));
+  // Not this platform's, not this chain's: decided without the network, as before the reset check.
+  const offPlatform = allSkipped(options.caseIds.map((id) => notApplicable(id, { issued: false })));
+  if (offPlatform) return offPlatform;
+
+  let payerSeed = '';
 
   // The run's own throwaway account, once created: swept back to the treasury at the end.
   let runSeed: string | undefined;
@@ -84,7 +99,16 @@ export async function runCases(options: RunOptions): Promise<Report> {
     }
   };
 
+  // From the first request on, the ledger is closed on every way out (finally below).
   try {
+    // Shortly after a testnet reset the issuers of the stablecoins may not be back yet: the run
+    // does without those assets and says so, rather than failing on what no plugin can fix.
+    withdrawn = (await ledger.withdrawMissingIssuers?.()) ?? [];
+    for (const asset of withdrawn) warn(asset.reason, (text) => options.log(text.replace(/\n$/, '')));
+    const nothingToRun = allSkipped(options.caseIds.map((id) => notApplicable(id)));
+    if (nothingToRun) return nothingToRun;
+
+    payerSeed = requireSeed(treasurySeedVariable(ledger.chain));
     let receivingAccount = options.receivingAccount;
     if (!receivingAccount && ledger.makesAccounts === false) {
       // No account to make: the merchant's wallet gives the address out. The run uses the shop's own.
@@ -152,7 +176,7 @@ export async function runCases(options: RunOptions): Promise<Report> {
       }
     }
 
-    const report: Report = { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results, spending: spendGuard().summary() };
+    const report: Report = { ...(withdrawn.length > 0 ? { withdrawn } : {}), tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results, spending: spendGuard().summary() };
 
     // The evidence is complete at this point; putting the shop back is housekeeping and
     // must not lose it. An account of the wrong form is not written at all; a refused or

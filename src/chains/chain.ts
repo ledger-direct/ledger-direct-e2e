@@ -122,6 +122,13 @@ export interface Authorization {
   asks: string;
 }
 
+/** An issued asset a run does without, with the sentence that says why (Ledger.withdrawMissingIssuers). */
+export interface WithdrawnAsset {
+  code: string;
+  issuer: string;
+  reason: string;
+}
+
 export interface Ledger {
   readonly chain: ChainId;
   readonly nativeAsset: string;
@@ -150,6 +157,13 @@ export interface Ledger {
    * (an MCP tool); pay() itself waits.
    */
   authorization?(seed: string): Promise<Authorization>;
+  /**
+   * Takes the issued assets whose issuer does not exist out of this ledger for the rest of
+   * the process, but only within a few days after a testnet reset (chains/xrpl/reset.ts):
+   * assets(), createFresh() and the cases that need issued assets then do without them.
+   * Returns what was withdrawn and why. Optional: a chain without issuers has nothing to check.
+   */
+  withdrawMissingIssuers?(): Promise<WithdrawnAsset[]>;
   /** A brand-new funded testnet account, optionally able to receive the issued assets. */
   createFresh(options?: { trustlines?: boolean }): Promise<FreshAccount>;
   /** Faucet top-up of an existing account. */

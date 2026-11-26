@@ -1,4 +1,4 @@
-import type { AccountSetResult, Authorization, Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult } from './chain.js';
+import type { AccountSetResult, Authorization, Balances, ChainAsset, ChainId, FreshAccount, IncomingPayment, Ledger, PaymentRequest, PaymentResult, SweepResult, WithdrawnAsset } from './chain.js';
 
 /**
  * The one place every payment passes before it is signed — `ld-e2e pay`, the
@@ -139,6 +139,8 @@ export class GuardedLedger implements Ledger {
   /** Asking for a grant spends nothing; what is paid under it passes pay(). */
   readonly authorize?: (seed: string, announce: (line: string) => void) => Promise<void>;
   readonly authorization?: (seed: string) => Promise<Authorization>;
+  /** Reads the network and changes what assets() answers; spends nothing. */
+  readonly withdrawMissingIssuers?: () => Promise<WithdrawnAsset[]>;
 
   constructor(
     private readonly inner: Ledger,
@@ -149,6 +151,7 @@ export class GuardedLedger implements Ledger {
     if (inner.requireDepositAuth) this.requireDepositAuth = (seed) => inner.requireDepositAuth!(seed);
     if (inner.authorize) this.authorize = (seed, announce) => inner.authorize!(seed, announce);
     if (inner.authorization) this.authorization = (seed) => inner.authorization!(seed);
+    if (inner.withdrawMissingIssuers) this.withdrawMissingIssuers = () => inner.withdrawMissingIssuers!();
   }
 
   get chain(): ChainId {
