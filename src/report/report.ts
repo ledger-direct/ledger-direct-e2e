@@ -1,6 +1,7 @@
 import { writeFile, mkdir } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import type { Evidence } from '../runner/context.js';
+import type { WithdrawnAsset } from '../chains/chain.js';
 
 export interface CaseResult {
   id: string;
@@ -28,6 +29,8 @@ export interface Report {
   spending?: { spent: Record<string, string>; maxPayment: string; budget?: Record<string, string> };
   /** What the run's throwaway receiving account sent back to the treasury afterwards. */
   returned?: { native: string; tokens: Record<string, string> };
+  /** Issued assets the run did without, shortly after a testnet reset (chains/xrpl/reset.ts). */
+  withdrawn?: WithdrawnAsset[];
 }
 
 export async function writeReport(report: Report, path: string): Promise<void> {

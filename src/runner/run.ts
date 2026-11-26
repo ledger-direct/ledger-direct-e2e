@@ -1,5 +1,6 @@
 import { appliesTo, CASES, findCase } from '../cases/catalogue.js';
-import type { Ledger } from '../chains/chain.js';
+import type { Ledger, WithdrawnAsset } from '../chains/chain.js';
+import { warn } from '../chains/xrpl/reset.js';
 import { isAccountOf, treasurySeedVariable } from '../chains/index.js';
 import { spendGuard } from '../chains/spend.js';
 import { requireSeed } from '../config.js';
@@ -33,6 +34,11 @@ export async function runCases(options: RunOptions): Promise<Report> {
   const ledger = options.ledger;
   const startedAt = new Date().toISOString();
 
+  // Shortly after a testnet reset the issuers of the stablecoins may not be back yet: the run
+  // does without those assets and says so, rather than failing on what no plugin can fix.
+  const withdrawn: WithdrawnAsset[] = (await ledger.withdrawMissingIssuers?.()) ?? [];
+  for (const asset of withdrawn) warn(asset.reason, (text) => options.log(text.replace(/\n$/, '')));
+
   /** The skip result for a case that is not this platform's or this chain's, null for one that is (or an unknown id). */
   const notApplicable = (id: string): CaseResult | null => {
     const spec = findCase(id);
@@ -41,7 +47,8 @@ export async function runCases(options: RunOptions): Promise<Report> {
     if (!appliesTo(spec, options.driver.name)) return skip(`not a case for ${options.driver.name} (${spec.targets?.join(', ') ?? ''} only)`);
     const issued = ledger.assets().filter((a) => !a.native).length;
     if (spec.needsIssuedAssets !== undefined && issued < spec.needsIssuedAssets) {
-      return skip(`needs ${spec.needsIssuedAssets} issued assets on ${ledger.chain}, which has ${issued}`);
+      const why = withdrawn.length > 0 ? ` (withdrawn after a testnet reset: ${withdrawn.map((a) => a.code).join(', ')})` : '';
+      return skip(`needs ${spec.needsIssuedAssets} issued assets on ${ledger.chain}, which has ${issued}${why}`);
     }
     const driverMissing = (spec.needsDriver ?? []).filter((m) => typeof options.driver[m] !== 'function');
     if (driverMissing.length > 0) return skip(`the ${options.driver.name} driver cannot read ${driverMissing.join(', ')} yet (the plugin does not check the receiving account)`);
@@ -56,7 +63,8 @@ export async function runCases(options: RunOptions): Promise<Report> {
   const skippedAll = options.caseIds.length > 0 ? options.caseIds.map(notApplicable) : [];
   if (skippedAll.length > 0 && skippedAll.every((r) => r !== null)) {
     for (const r of skippedAll as CaseResult[]) options.log(`${r.id} ${r.title}: skipped, ${r.reason}`);
-    return { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount: options.receivingAccount ?? '', network: 'testnet', startedAt, results: skippedAll as CaseResult[], spending: spendGuard().summary() };
+    await ledger.close();
+    return { ...(withdrawn.length > 0 ? { withdrawn } : {}), tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount: options.receivingAccount ?? '', network: 'testnet', startedAt, results: skippedAll as CaseResult[], spending: spendGuard().summary() };
   }
 
   const payerSeed = requireSeed(treasurySeedVariable(ledger.chain));
@@ -152,7 +160,7 @@ export async function runCases(options: RunOptions): Promise<Report> {
       }
     }
 
-    const report: Report = { tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results, spending: spendGuard().summary() };
+    const report: Report = { ...(withdrawn.length > 0 ? { withdrawn } : {}), tool: 'ld-e2e', version: options.version, target: options.driver.name, chain: ledger.chain, baseUrl: options.baseUrl, receivingAccount, network: 'testnet', startedAt, results, spending: spendGuard().summary() };
 
     // The evidence is complete at this point; putting the shop back is housekeeping and
     // must not lose it. An account of the wrong form is not written at all; a refused or

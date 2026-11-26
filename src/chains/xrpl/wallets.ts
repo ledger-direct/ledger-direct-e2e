@@ -90,7 +90,8 @@ export async function createFresh(client: Client, options: { trustlines?: boolea
   const wallet = profile.freshAccounts === 'treasury' ? await openFromTreasury(client, options.funderSeed, profile) : await fromFaucet(profile);
   // The faucet answers before the funding transaction is validated; wait for the account to exist.
   await waitForAccount(client, wallet.classicAddress);
-  const trustlines = options.trustlines && Object.keys(profile.issued).length > 0 ? await setTrustlines(client, wallet) : {};
+  const codes = Object.keys(profile.issued) as Exclude<Asset, 'XRP'>[];
+  const trustlines = options.trustlines && codes.length > 0 ? await setTrustlines(client, wallet, codes) : {};
   requireTrustlines(trustlines);
   return { wallet, trustlines };
 }
