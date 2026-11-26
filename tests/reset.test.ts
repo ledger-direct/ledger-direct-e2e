@@ -116,3 +116,36 @@ describe('the warning', () => {
     expect(out).toEqual(['warning: RLUSD withdrawn\n', '::warning title=Testnet reset::RLUSD withdrawn\n']);
   });
 });
+
+describe('the reset check and the ledger connection', () => {
+  const driver = { name: 'prestashop', configure: async () => { throw new Error('not for a skipped case'); } } as unknown as Driver;
+
+  it('is not asked when no case is this platform\'s: those skips need no network', async () => {
+    let asked = 0;
+    const ledger = {
+      chain: 'XRPL',
+      nativeAsset: 'XRP',
+      assets: () => [{ code: 'XRP', native: true }],
+      withdrawMissingIssuers: async () => { asked++; throw new Error('the testnet does not answer'); },
+      close: async () => {},
+    } as unknown as Ledger;
+
+    const report = await runCases({ driver, ledger, baseUrl: 'http://shop.test', caseIds: ['PS-12'], timeoutMs: 1000, version: 'test', log: () => {} });
+    expect(report.results[0]).toMatchObject({ id: 'PS-12', outcome: 'skip' });
+    expect(asked).toBe(0);
+  });
+
+  it('closes the ledger when the check itself fails', async () => {
+    let closed = 0;
+    const ledger = {
+      chain: 'XRPL',
+      nativeAsset: 'XRP',
+      assets: () => [{ code: 'XRP', native: true }],
+      withdrawMissingIssuers: async () => { throw new Error('the testnet does not answer'); },
+      close: async () => { closed++; },
+    } as unknown as Ledger;
+
+    await expect(runCases({ driver, ledger, baseUrl: 'http://shop.test', caseIds: ['PS-01'], timeoutMs: 1000, version: 'test', log: () => {} })).rejects.toThrow('the testnet does not answer');
+    expect(closed).toBe(1);
+  });
+});
