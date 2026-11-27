@@ -112,6 +112,15 @@ export function incomingPaymentId(url: string): string {
 
 /** How long the owner has: a Dassie node lets a request lapse after ten minutes. */
 const APPROVAL_WAIT_MS = 10 * 60 * 1000;
+/**
+ * The least time between two continuations, whatever shorter `wait` a wallet names. GNAP makes
+ * `wait` the time a client waits at least (RFC 9635 §3.1), so asking less often is allowed.
+ * Rafiki names one second and checks the client's key set on every continuation; five seconds
+ * keep that to a fifth and cost at most four seconds once the owner decided.
+ */
+const MIN_POLL_SECONDS = 5;
+/** How many continuations in a row may fail without the request being over before the wait ends. */
+const CONTINUATION_RETRIES = 3;
 /** How long a payment may take to arrive once the wallet accepted it. */
 const DELIVERY_WAIT_MS = 90_000;
 /** A token this close to its end is rotated before it is used. */
@@ -146,6 +155,16 @@ interface GrantRequest {
  */
 function isFinal(error: unknown): boolean {
   return error instanceof OpenPaymentsError && error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429;
+}
+
+/**
+ * A continuation's answer that ends the request: a final one, except `invalid_client`. The wallet
+ * knew the client when it took the request, so not knowing it at a continuation is the wallet's
+ * trouble, not the request's end. Rafiki says so whenever one fetch of the client's key set fails
+ * (`getClientKey()` in `packages/auth/src/client/service.ts` returns nothing on any error).
+ */
+function endsTheRequest(error: unknown): boolean {
+  return isFinal(error) && !(error instanceof OpenPaymentsError && error.code === 'invalid_client');
 }
 
 /** The wallet does not know the token (any more): revoked by the owner, or run out. */
@@ -422,17 +441,24 @@ export class InterledgerLedger implements Ledger {
     }
     const deadline = Date.now() + APPROVAL_WAIT_MS;
     let pending: PendingGrant | undefined;
+    let failures = 0;
     try {
       while (answer.kind === 'pending') {
         pending = answer.grant;
         if (Date.now() >= deadline) throw new Error('the owner did not decide the grant in time');
-        await this.sleep(pending.waitSeconds * 1000);
-        answer = await client.continueGrant(pending);
+        await this.sleep(Math.max(pending.waitSeconds, MIN_POLL_SECONDS) * 1000);
+        try {
+          answer = await client.continueGrant(pending);
+          failures = 0;
+        } catch (error) {
+          // The request still waits, with the same continuation: ask again, a few times.
+          if (endsTheRequest(error) || ++failures > CONTINUATION_RETRIES) throw error;
+        }
       }
     } catch (error) {
       // Whatever ended the wait, nothing stays waiting in the owner's wallet: withdrawn, unless
       // the wallet itself said the request is over.
-      if (pending && !isFinal(error)) await client.cancelGrant(pending).catch(() => undefined);
+      if (pending && !endsTheRequest(error)) await client.cancelGrant(pending).catch(() => undefined);
       throw error instanceof OpenPaymentsError ? new Error(`the grant was not given: ${error.message}`) : error;
     }
     announce(`grant approved: up to ${this.settings.grantLimit} ${wallet.assetCode}`);
