@@ -16,3 +16,6 @@ out/
 
 # IDE state is per person and per machine
 .idea/
+
+# The decision register, cloned by bin/decisions. It is private: never commit it.
+/.decisions/
