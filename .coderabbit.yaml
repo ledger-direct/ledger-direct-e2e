@@ -1,0 +1,9 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Only what this repository adds; everything else comes from the organisation's settings.
+inheritance: true
+knowledge_base:
+  code_guidelines:
+    enabled: true
+    # The rules for agents. The decisions themselves are not in this repository.
+    filePatterns:
+    - AGENTS.md
